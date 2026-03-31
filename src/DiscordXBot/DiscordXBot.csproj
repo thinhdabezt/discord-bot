@@ -15,7 +15,8 @@
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
     <PackageReference Include="Microsoft.Extensions.Hosting" Version="8.0.1" />
+    <PackageReference Include="Microsoft.Extensions.Http" Version="8.0.0" />
     <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="8.0.8" />
-    <PackageReference Include="System.ServiceModel.Syndication" Version="8.1.2" />
+    <PackageReference Include="System.ServiceModel.Syndication" Version="9.0.0" />
   </ItemGroup>
 </Project>
