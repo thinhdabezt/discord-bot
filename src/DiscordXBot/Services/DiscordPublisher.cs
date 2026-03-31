@@ -53,6 +53,8 @@ public sealed class DiscordPublisher(
                     post.Url);
             }
 
+            var publicPostUrl = NormalizePostUrlForDisplay(sanitizedPostUrl);
+
             var sanitizedImages = content.ImageUrls
                 .Select(DiscordUrlSanitizer.Sanitize)
                 .Where(x => x is not null)
@@ -73,19 +75,26 @@ public sealed class DiscordPublisher(
                 feed.XUsername,
                 content.Caption,
                 content.PostedAtUtc,
-                sanitizedPostUrl);
+                publicPostUrl);
+
+            var maxAdditionalImages = Math.Max(0, _publishOptions.CurrentValue.MaxAdditionalImages);
+            var maxImagesPerMessage = 10;
+            var maxImagesToSend = Math.Min(maxImagesPerMessage, 1 + maxAdditionalImages);
+
+            var embeds = sanitizedImages
+                .Take(maxImagesToSend)
+                .Select(image => new EmbedBuilder()
+                    .WithColor(new Color(29, 161, 242))
+                    .WithImageUrl(image)
+                    .Build())
+                .ToArray();
 
             var requestOptions = new RequestOptions { CancelToken = cancellationToken };
             try
             {
-                if (sanitizedImages.Count > 0)
+                if (embeds.Length > 0)
                 {
-                    var embed = new EmbedBuilder()
-                        .WithColor(new Color(29, 161, 242))
-                        .WithImageUrl(sanitizedImages[0])
-                        .Build();
-
-                    await channel.SendMessageAsync(text: messageText, embed: embed, options: requestOptions);
+                    await channel.SendMessageAsync(text: messageText, embeds: embeds, options: requestOptions);
                 }
                 else
                 {
@@ -96,39 +105,12 @@ public sealed class DiscordPublisher(
             {
                 _logger.LogWarning(
                     ex,
-                    "Invalid URL payload for tweet {TweetId}. Falling back to text-only publish. PostUrl={PostUrl}, FirstImage={FirstImage}",
+                    "Invalid URL payload for tweet {TweetId}. Falling back to text-only publish. PostUrl={PostUrl}, EmbedCount={EmbedCount}",
                     post.TweetId,
-                    sanitizedPostUrl,
-                    sanitizedImages.FirstOrDefault());
+                    publicPostUrl,
+                    embeds.Length);
 
                 await channel.SendMessageAsync(text: messageText, options: requestOptions);
-
-                // Main message fallback already sent; skip additional image embeds for this post.
-                sanitizedImages.Clear();
-            }
-
-            var maxAdditionalImages = Math.Max(0, _publishOptions.CurrentValue.MaxAdditionalImages);
-
-            // Send additional images as separate embeds to preserve ordering and avoid giant messages.
-            foreach (var image in sanitizedImages.Skip(1).Take(maxAdditionalImages))
-            {
-                var extraEmbed = new EmbedBuilder()
-                    .WithColor(new Color(29, 161, 242))
-                    .WithImageUrl(image)
-                    .Build();
-
-                try
-                {
-                    await channel.SendMessageAsync(embed: extraEmbed, options: requestOptions);
-                }
-                catch (HttpException ex) when (IsInvalidUrlPayload(ex))
-                {
-                    _logger.LogWarning(
-                        ex,
-                        "Skipping invalid additional image URL for tweet {TweetId}: {ImageUrl}",
-                        post.TweetId,
-                        image);
-                }
             }
 
             _logger.LogInformation(
@@ -210,5 +192,41 @@ public sealed class DiscordPublisher(
         }
 
         return text;
+    }
+
+    internal static string? NormalizePostUrlForDisplay(string? postUrl)
+    {
+        if (string.IsNullOrWhiteSpace(postUrl))
+        {
+            return postUrl;
+        }
+
+        if (!Uri.TryCreate(postUrl, UriKind.Absolute, out var uri))
+        {
+            return postUrl;
+        }
+
+        if (!uri.Host.Contains("nitter", StringComparison.OrdinalIgnoreCase))
+        {
+            return postUrl;
+        }
+
+        var segments = uri.AbsolutePath
+            .Split('/', StringSplitOptions.RemoveEmptyEntries);
+
+        if (segments.Length >= 3 &&
+            string.Equals(segments[1], "status", StringComparison.OrdinalIgnoreCase))
+        {
+            return $"https://x.com/{segments[0]}/status/{segments[2]}";
+        }
+
+        if (segments.Length >= 3 &&
+            string.Equals(segments[0], "i", StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(segments[1], "status", StringComparison.OrdinalIgnoreCase))
+        {
+            return $"https://x.com/i/status/{segments[2]}";
+        }
+
+        return postUrl;
     }
 }

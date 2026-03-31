@@ -57,4 +57,24 @@ public class DiscordPublisherTests
         Assert.True(text.Length <= 1903);
         Assert.EndsWith("...", text, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public void NormalizePostUrlForDisplay_ConvertsNitterStatusToXCom()
+    {
+        var normalized = DiscordPublisher.NormalizePostUrlForDisplay(
+            "https://nitter.net/MeDrives1338/status/2039116050038460527#m");
+
+        Assert.Equal(
+            "https://x.com/MeDrives1338/status/2039116050038460527",
+            normalized);
+    }
+
+    [Fact]
+    public void NormalizePostUrlForDisplay_KeepsNonNitterUrl()
+    {
+        var normalized = DiscordPublisher.NormalizePostUrlForDisplay(
+            "https://x.com/medrives1338/status/1");
+
+        Assert.Equal("https://x.com/medrives1338/status/1", normalized);
+    }
 }

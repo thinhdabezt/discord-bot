@@ -113,6 +113,24 @@ public class TweetContentParserTests
     }
 
     [Fact]
+    public void Parse_AllowsImageOnlyPostWithoutCaption()
+    {
+        var post = new RssPost(
+            TweetId: "tweet-6b",
+            Url: "https://x.com/u/status/6b",
+            Title: string.Empty,
+            SummaryHtml: "<img src='https://pbs.twimg.com/media/only-image.jpg:small' />",
+            PublishedAtUtc: DateTime.UtcNow);
+
+        var result = _parser.Parse(post);
+
+        Assert.Equal("https://x.com/u/status/6b", result.Caption);
+        Assert.Single(result.ImageUrls);
+        Assert.Equal("https://pbs.twimg.com/media/only-image.jpg:orig", result.ImageUrls[0]);
+        Assert.Equal(ParsedMediaType.ImageOnly, result.MediaType);
+    }
+
+    [Fact]
     public void Parse_ClassifiesGifOnlyPosts()
     {
         var post = new RssPost(
