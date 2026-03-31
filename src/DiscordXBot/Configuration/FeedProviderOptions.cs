@@ -10,5 +10,5 @@ public sealed class FeedProviderOptions
     public bool EnableRssHub { get; set; } = false;
     public string RssHubBaseUrl { get; set; } = "http://rsshub:1200";
     public FeedProvider DefaultXProvider { get; set; } = FeedProvider.RssBridge;
-    public FeedProvider DefaultFacebookProvider { get; set; } = FeedProvider.DirectRss;
+    public FeedProvider DefaultFacebookProvider { get; set; } = FeedProvider.RssHub;
 }
