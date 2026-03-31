@@ -2,6 +2,7 @@ using DiscordXBot;
 using DiscordXBot.Configuration;
 using DiscordXBot.Data;
 using DiscordXBot.Discord;
+using DiscordXBot.Services;
 using Discord;
 using Discord.Interactions;
 using Discord.WebSocket;
@@ -39,6 +40,9 @@ builder.Services.AddSingleton(_ => new DiscordSocketClient(new DiscordSocketConf
 }));
 
 builder.Services.AddSingleton(provider => new InteractionService(provider.GetRequiredService<DiscordSocketClient>()));
+builder.Services.AddSingleton<RssBridgeClient>();
+builder.Services.AddSingleton<TweetContentParser>();
+builder.Services.AddSingleton<DiscordPublisher>();
 
 builder.Services.AddHostedService<DiscordGatewayHostedService>();
 builder.Services.AddHostedService<InteractionHandlerHostedService>();
