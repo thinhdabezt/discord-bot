@@ -1,12 +1,18 @@
 using System.ServiceModel.Syndication;
 using System.Xml;
+using DiscordXBot.Configuration;
 using DiscordXBot.Services.Models;
+using Microsoft.Extensions.Options;
 
 namespace DiscordXBot.Services;
 
-public sealed class RssBridgeClient(IHttpClientFactory httpClientFactory, ILogger<RssBridgeClient> logger)
+public sealed class RssBridgeClient(
+    IHttpClientFactory httpClientFactory,
+    IOptionsMonitor<RssBridgeOptions> rssBridgeOptions,
+    ILogger<RssBridgeClient> logger)
 {
     private readonly IHttpClientFactory _httpClientFactory = httpClientFactory;
+    private readonly IOptionsMonitor<RssBridgeOptions> _rssBridgeOptions = rssBridgeOptions;
     private readonly ILogger<RssBridgeClient> _logger = logger;
 
     public async Task<IReadOnlyList<RssPost>> GetPostsAsync(string rssUrl, int maxItems, CancellationToken cancellationToken)
@@ -44,8 +50,125 @@ public sealed class RssBridgeClient(IHttpClientFactory httpClientFactory, ILogge
             .Take(Math.Max(1, maxItems))
             .ToList();
 
+        if (posts.Count == 0 && skippedErrorItems > 0)
+        {
+            var fallbackPosts = await TryFetchNitterFallbackAsync(rssUrl, maxItems, cancellationToken);
+            if (fallbackPosts.Count > 0)
+            {
+                return fallbackPosts;
+            }
+        }
+
         _logger.LogDebug("Fetched {Count} post(s) from {RssUrl}", posts.Count, rssUrl);
         return posts;
+    }
+
+    private async Task<IReadOnlyList<RssPost>> TryFetchNitterFallbackAsync(
+        string rssUrl,
+        int maxItems,
+        CancellationToken cancellationToken)
+    {
+        if (!_rssBridgeOptions.CurrentValue.EnableNitterFallback)
+        {
+            return [];
+        }
+
+        if (!TryExtractUsernameFromRssUrl(rssUrl, out var username))
+        {
+            return [];
+        }
+
+        var nitterBaseUrl = _rssBridgeOptions.CurrentValue.NitterBaseUrl?.TrimEnd('/');
+        if (string.IsNullOrWhiteSpace(nitterBaseUrl))
+        {
+            return [];
+        }
+
+        var fallbackUrl = $"{nitterBaseUrl}/{Uri.EscapeDataString(username)}/rss";
+
+        try
+        {
+            var client = _httpClientFactory.CreateClient();
+            using var response = await client.GetAsync(fallbackUrl, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger.LogWarning(
+                    "Nitter fallback request failed for @{Username}. StatusCode={StatusCode}, Url={Url}",
+                    username,
+                    (int)response.StatusCode,
+                    fallbackUrl);
+                return [];
+            }
+
+            await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+            using var reader = XmlReader.Create(stream, new XmlReaderSettings { Async = false });
+            var feed = SyndicationFeed.Load(reader);
+            if (feed?.Items is null)
+            {
+                return [];
+            }
+
+            var posts = feed.Items
+                .Select(MapItem)
+                .Where(x => !string.IsNullOrWhiteSpace(x.TweetId))
+                .Take(Math.Max(1, maxItems))
+                .ToList();
+
+            if (posts.Count > 0)
+            {
+                _logger.LogInformation(
+                    "Using Nitter fallback for @{Username}. Retrieved {Count} post(s) from {Url}",
+                    username,
+                    posts.Count,
+                    fallbackUrl);
+            }
+
+            return posts;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "Nitter fallback failed for @{Username}. Url={Url}",
+                username,
+                fallbackUrl);
+            return [];
+        }
+    }
+
+    private static bool TryExtractUsernameFromRssUrl(string rssUrl, out string username)
+    {
+        username = string.Empty;
+
+        if (!Uri.TryCreate(rssUrl, UriKind.Absolute, out var uri))
+        {
+            return false;
+        }
+
+        var query = uri.Query.TrimStart('?');
+        if (string.IsNullOrWhiteSpace(query))
+        {
+            return false;
+        }
+
+        foreach (var pair in query.Split('&', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var parts = pair.Split('=', 2);
+            if (parts.Length != 2)
+            {
+                continue;
+            }
+
+            if (!parts[0].Equals("u", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            username = Uri.UnescapeDataString(parts[1]).Trim();
+            return !string.IsNullOrWhiteSpace(username);
+        }
+
+        return false;
     }
 
     private static RssPost MapItem(SyndicationItem item)

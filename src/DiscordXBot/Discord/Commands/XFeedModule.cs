@@ -295,6 +295,14 @@ public sealed class XFeedModule(
                     var body = await response.Content.ReadAsStringAsync(cts.Token);
                     if (LooksLikeBridgeErrorPayload(body))
                     {
+                        if (await ValidateNitterFallbackAsync(rssUrl, client))
+                        {
+                            _logger.LogWarning(
+                                "RSS validation received bridge error payload for URL {RssUrl}, but Nitter fallback is available.",
+                                rssUrl);
+                            return true;
+                        }
+
                         _logger.LogWarning("RSS validation returned bridge error payload for URL {RssUrl}", rssUrl);
                         return false;
                     }
@@ -326,6 +334,73 @@ public sealed class XFeedModule(
                 _logger.LogWarning(ex, "RSS validation failed for URL {RssUrl}", rssUrl);
                 return false;
             }
+        }
+
+        return false;
+    }
+
+    private async Task<bool> ValidateNitterFallbackAsync(string rssUrl, HttpClient client)
+    {
+        if (!_rssBridgeOptions.Value.EnableNitterFallback)
+        {
+            return false;
+        }
+
+        if (!TryExtractUsernameFromRssUrl(rssUrl, out var username))
+        {
+            return false;
+        }
+
+        var nitterBaseUrl = _rssBridgeOptions.Value.NitterBaseUrl?.TrimEnd('/');
+        if (string.IsNullOrWhiteSpace(nitterBaseUrl))
+        {
+            return false;
+        }
+
+        var fallbackUrl = $"{nitterBaseUrl}/{Uri.EscapeDataString(username)}/rss";
+
+        try
+        {
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(8));
+            using var response = await client.GetAsync(fallbackUrl, HttpCompletionOption.ResponseHeadersRead, cts.Token);
+            return response.IsSuccessStatusCode;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static bool TryExtractUsernameFromRssUrl(string rssUrl, out string username)
+    {
+        username = string.Empty;
+
+        if (!Uri.TryCreate(rssUrl, UriKind.Absolute, out var uri))
+        {
+            return false;
+        }
+
+        var query = uri.Query.TrimStart('?');
+        if (string.IsNullOrWhiteSpace(query))
+        {
+            return false;
+        }
+
+        foreach (var pair in query.Split('&', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var parts = pair.Split('=', 2);
+            if (parts.Length != 2)
+            {
+                continue;
+            }
+
+            if (!parts[0].Equals("u", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            username = Uri.UnescapeDataString(parts[1]).Trim();
+            return !string.IsNullOrWhiteSpace(username);
         }
 
         return false;
