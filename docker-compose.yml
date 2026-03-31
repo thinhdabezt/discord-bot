@@ -29,5 +29,32 @@ services:
       timeout: 10s
       retries: 3
 
+  bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: discord-x-bot
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      rss-bridge:
+        condition: service_healthy
+    environment:
+      DISCORD__TOKEN: ${DISCORD_TOKEN}
+      DISCORD__DEVGUILDID: ${DISCORD_GUILD_ID}
+      CONNECTIONSTRINGS__DEFAULT: Host=db;Port=5432;Database=${POSTGRES_DB:-discordbot};Username=${POSTGRES_USER:-postgres};Password=${POSTGRES_PASSWORD:-postgres}
+      RSSBRIDGE__BASEURL: http://rss-bridge:80
+      POLLING__INTERVALMINUTES: ${POLLING__INTERVALMINUTES:-10}
+      POLLING__MAXITEMSPERFEED: ${POLLING__MAXITEMSPERFEED:-5}
+      RETRY__MAXRETRIES: ${RETRY__MAXRETRIES:-3}
+      RETRY__PUBLISHMAXRETRIES: ${RETRY__PUBLISHMAXRETRIES:-2}
+      RETRY__INITIALDELAYSECONDS: ${RETRY__INITIALDELAYSECONDS:-2}
+      PUBLISH__MAXCONCURRENTPUBLISHES: ${PUBLISH__MAXCONCURRENTPUBLISHES:-2}
+      PUBLISH__INTERPUBLISHDELAYMS: ${PUBLISH__INTERPUBLISHDELAYMS:-200}
+      PUBLISH__MAXADDITIONALIMAGES: ${PUBLISH__MAXADDITIONALIMAGES:-3}
+    profiles:
+      - prod
+
 volumes:
   postgres-data:
