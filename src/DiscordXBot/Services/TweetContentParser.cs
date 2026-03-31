@@ -81,6 +81,8 @@ public sealed class TweetContentParser
             return normalized;
         }
 
+        normalized = NormalizeNitterImageUrl(normalized);
+
         if (normalized.Contains("pbs.twimg.com", StringComparison.OrdinalIgnoreCase))
         {
             normalized = normalized
@@ -92,5 +94,52 @@ public sealed class TweetContentParser
         }
 
         return normalized;
+    }
+
+    private static string NormalizeNitterImageUrl(string url)
+    {
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri))
+        {
+            return url;
+        }
+
+        if (!uri.Host.Contains("nitter", StringComparison.OrdinalIgnoreCase))
+        {
+            return url;
+        }
+
+        var marker = "/pic/";
+        var markerIndex = uri.AbsolutePath.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
+        if (markerIndex < 0)
+        {
+            return url;
+        }
+
+        var encodedPayload = uri.AbsolutePath[(markerIndex + marker.Length)..];
+        if (string.IsNullOrWhiteSpace(encodedPayload))
+        {
+            return url;
+        }
+
+        var decoded = Uri.UnescapeDataString(encodedPayload);
+        if (string.IsNullOrWhiteSpace(decoded))
+        {
+            return url;
+        }
+
+        if (Uri.TryCreate(decoded, UriKind.Absolute, out var absoluteDecoded))
+        {
+            return absoluteDecoded.ToString();
+        }
+
+        if (decoded.StartsWith("media/", StringComparison.OrdinalIgnoreCase) ||
+            decoded.StartsWith("profile_images/", StringComparison.OrdinalIgnoreCase) ||
+            decoded.StartsWith("amplify_video_thumb/", StringComparison.OrdinalIgnoreCase) ||
+            decoded.StartsWith("tweet_video_thumb/", StringComparison.OrdinalIgnoreCase))
+        {
+            return "https://pbs.twimg.com/" + decoded;
+        }
+
+        return url;
     }
 }

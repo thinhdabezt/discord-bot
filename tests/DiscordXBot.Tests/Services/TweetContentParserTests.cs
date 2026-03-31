@@ -89,4 +89,20 @@ public class TweetContentParserTests
         Assert.Single(result.ImageUrls);
         Assert.Equal("https://pbs.twimg.com/media/d.jpg:orig", result.ImageUrls[0]);
     }
+
+    [Fact]
+    public void Parse_NormalizesNitterProxyImageUrlsToPbs()
+    {
+        var post = new RssPost(
+            TweetId: "tweet-6",
+            Url: "https://nitter.net/MeDrives1338/status/2039103555311689847#m",
+            Title: "Caption",
+            SummaryHtml: "<img src='https://nitter.net/pic/media%2FHExZ3ZObQAAUBTK.jpg' />",
+            PublishedAtUtc: DateTime.UtcNow);
+
+        var result = _parser.Parse(post);
+
+        Assert.Single(result.ImageUrls);
+        Assert.Equal("https://pbs.twimg.com/media/HExZ3ZObQAAUBTK.jpg", result.ImageUrls[0]);
+    }
 }
