@@ -13,5 +13,5 @@ FROM mcr.microsoft.com/dotnet/runtime:8.0 AS runtime
 WORKDIR /app
 COPY --from=build /app/publish ./
 
-ENV DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1
+ENV DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=0
 ENTRYPOINT ["dotnet", "DiscordXBot.dll"]
