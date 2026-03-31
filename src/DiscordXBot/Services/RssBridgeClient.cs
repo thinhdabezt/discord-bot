@@ -1,6 +1,7 @@
 using System.ServiceModel.Syndication;
 using System.Xml;
 using DiscordXBot.Configuration;
+using DiscordXBot.Data.Entities;
 using DiscordXBot.Services.Models;
 using Microsoft.Extensions.Options;
 
@@ -15,8 +16,22 @@ public sealed class RssBridgeClient(
     private readonly IOptionsMonitor<RssBridgeOptions> _rssBridgeOptions = rssBridgeOptions;
     private readonly ILogger<RssBridgeClient> _logger = logger;
 
-    public async Task<IReadOnlyList<RssPost>> GetPostsAsync(string rssUrl, int maxItems, CancellationToken cancellationToken)
+    public Task<IReadOnlyList<RssPost>> GetPostsAsync(string rssUrl, int maxItems, CancellationToken cancellationToken)
     {
+        var legacyFeed = new TrackedFeed
+        {
+            RssUrl = rssUrl,
+            Platform = FeedPlatform.X,
+            Provider = FeedProvider.RssBridge,
+            SourceKey = string.Empty
+        };
+
+        return GetPostsAsync(legacyFeed, maxItems, cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<RssPost>> GetPostsAsync(TrackedFeed trackedFeed, int maxItems, CancellationToken cancellationToken)
+    {
+        var rssUrl = trackedFeed.RssUrl;
         var client = _httpClientFactory.CreateClient();
 
         using var response = await client.GetAsync(rssUrl, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
@@ -50,9 +65,15 @@ public sealed class RssBridgeClient(
             .Take(Math.Max(1, maxItems))
             .ToList();
 
-        if (posts.Count == 0 && skippedErrorItems > 0)
+        if (posts.Count == 0 && skippedErrorItems > 0 &&
+            trackedFeed.Platform == FeedPlatform.X &&
+            trackedFeed.Provider == FeedProvider.RssBridge)
         {
-            var fallbackPosts = await TryFetchNitterFallbackAsync(rssUrl, maxItems, cancellationToken);
+            var fallbackPosts = await TryFetchNitterFallbackAsync(
+                rssUrl,
+                trackedFeed.SourceKey,
+                maxItems,
+                cancellationToken);
             if (fallbackPosts.Count > 0)
             {
                 return fallbackPosts;
@@ -65,6 +86,7 @@ public sealed class RssBridgeClient(
 
     private async Task<IReadOnlyList<RssPost>> TryFetchNitterFallbackAsync(
         string rssUrl,
+        string sourceKey,
         int maxItems,
         CancellationToken cancellationToken)
     {
@@ -74,6 +96,11 @@ public sealed class RssBridgeClient(
         }
 
         if (!TryExtractUsernameFromRssUrl(rssUrl, out var username))
+        {
+            username = sourceKey;
+        }
+
+        if (string.IsNullOrWhiteSpace(username))
         {
             return [];
         }

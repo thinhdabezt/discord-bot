@@ -3,6 +3,7 @@ using System.Net.Http;
 using DiscordXBot.Configuration;
 using DiscordXBot.Data;
 using DiscordXBot.Data.Entities;
+using DiscordXBot.Services;
 using Discord;
 using Discord.Interactions;
 using Discord.WebSocket;
@@ -16,13 +17,17 @@ public sealed class XFeedModule(
     BotDbContext db,
     IHttpClientFactory httpClientFactory,
     IOptions<RssBridgeOptions> rssBridgeOptions,
+    IOptionsMonitor<FeedProviderOptions> feedProviderOptions,
     IOptions<RetryOptions> retryOptions,
+    FeedUrlResolver feedUrlResolver,
     ILogger<XFeedModule> logger) : InteractionModuleBase<SocketInteractionContext>
 {
     private readonly BotDbContext _db = db;
     private readonly IHttpClientFactory _httpClientFactory = httpClientFactory;
     private readonly IOptions<RssBridgeOptions> _rssBridgeOptions = rssBridgeOptions;
+    private readonly IOptionsMonitor<FeedProviderOptions> _feedProviderOptions = feedProviderOptions;
     private readonly IOptions<RetryOptions> _retryOptions = retryOptions;
+    private readonly FeedUrlResolver _feedUrlResolver = feedUrlResolver;
     private readonly ILogger<XFeedModule> _logger = logger;
 
     [SlashCommand("add-x", "Add an X account feed to a Discord channel")]
@@ -61,8 +66,26 @@ public sealed class XFeedModule(
 
         await EnsureDeferredAsync();
 
-        var rssUrl = BuildRssUrl(normalizedUsername);
-        if (!await ValidateRssAsync(rssUrl))
+        var provider = _feedUrlResolver.GetDefaultProvider(FeedPlatform.X);
+        if (!_feedUrlResolver.IsProviderEnabled(provider))
+        {
+            await ReplyAsync($"Provider {provider} is disabled by configuration.");
+            return;
+        }
+
+        string rssUrl;
+        try
+        {
+            rssUrl = _feedUrlResolver.Resolve(FeedPlatform.X, provider, normalizedUsername);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to resolve RSS URL for @{Username} with provider {Provider}", normalizedUsername, provider);
+            await ReplyAsync("Unable to construct RSS URL from current provider settings.");
+            return;
+        }
+
+        if (!await ValidateRssAsync(rssUrl, FeedPlatform.X, provider, normalizedUsername))
         {
             _logger.LogInformation("add-x validation failed for @{Username}", normalizedUsername);
             await ReplyAsync($"Unable to validate feed for @{normalizedUsername}. Check username or RSS-Bridge settings.");
@@ -73,7 +96,10 @@ public sealed class XFeedModule(
         var channelId = unchecked((long)channel.Id);
 
         var existing = await _db.TrackedFeeds.FirstOrDefaultAsync(x =>
-            x.GuildId == guildId && x.ChannelId == channelId && x.XUsername == normalizedUsername);
+            x.GuildId == guildId &&
+            x.ChannelId == channelId &&
+            x.Platform == FeedPlatform.X &&
+            x.SourceKey == normalizedUsername);
 
         if (existing is not null)
         {
@@ -87,6 +113,9 @@ public sealed class XFeedModule(
             GuildId = guildId,
             ChannelId = channelId,
             XUsername = normalizedUsername,
+            SourceKey = normalizedUsername,
+            Platform = FeedPlatform.X,
+            Provider = provider,
             RssUrl = rssUrl,
             IsActive = true,
             CreatedAtUtc = DateTime.UtcNow,
@@ -128,8 +157,8 @@ public sealed class XFeedModule(
         var guildId = unchecked((long)Context.Guild.Id);
         var feeds = await _db.TrackedFeeds
             .AsNoTracking()
-            .Where(x => x.GuildId == guildId && x.IsActive)
-            .OrderBy(x => x.XUsername)
+            .Where(x => x.GuildId == guildId && x.IsActive && x.Platform == FeedPlatform.X)
+            .OrderBy(x => x.SourceKey)
             .ThenBy(x => x.ChannelId)
             .ToListAsync();
 
@@ -140,7 +169,7 @@ public sealed class XFeedModule(
         }
 
         var lines = feeds
-            .Select(x => $"- @{x.XUsername} -> <#{x.ChannelId}>")
+            .Select(x => $"- @{x.SourceKey} -> <#{x.ChannelId}> ({x.Provider})")
             .Take(25)
             .ToList();
 
@@ -186,7 +215,8 @@ public sealed class XFeedModule(
         var guildId = unchecked((long)Context.Guild.Id);
         var query = _db.TrackedFeeds.Where(x =>
             x.GuildId == guildId &&
-            x.XUsername == normalizedUsername);
+            x.Platform == FeedPlatform.X &&
+            x.SourceKey == normalizedUsername);
 
         if (channel is not null)
         {
@@ -271,13 +301,7 @@ public sealed class XFeedModule(
         return true;
     }
 
-    private string BuildRssUrl(string username)
-    {
-        var baseUrl = _rssBridgeOptions.Value.BaseUrl.TrimEnd('/');
-        return $"{baseUrl}/?action=display&bridge=TwitterBridge&context=By+username&u={Uri.EscapeDataString(username)}&format=Atom";
-    }
-
-    private async Task<bool> ValidateRssAsync(string rssUrl)
+    private async Task<bool> ValidateRssAsync(string rssUrl, FeedPlatform platform, FeedProvider provider, string sourceKey)
     {
         var maxRetries = Math.Max(0, _retryOptions.Value.MaxRetries);
         var initialDelaySeconds = Math.Max(1, _retryOptions.Value.InitialDelaySeconds);
@@ -295,7 +319,9 @@ public sealed class XFeedModule(
                     var body = await response.Content.ReadAsStringAsync(cts.Token);
                     if (LooksLikeBridgeErrorPayload(body))
                     {
-                        if (await ValidateNitterFallbackAsync(rssUrl, client))
+                        if (platform == FeedPlatform.X &&
+                            provider == FeedProvider.RssBridge &&
+                            await ValidateNitterFallbackAsync(rssUrl, sourceKey, client))
                         {
                             _logger.LogWarning(
                                 "RSS validation received bridge error payload for URL {RssUrl}, but Nitter fallback is available.",
@@ -339,7 +365,7 @@ public sealed class XFeedModule(
         return false;
     }
 
-    private async Task<bool> ValidateNitterFallbackAsync(string rssUrl, HttpClient client)
+    private async Task<bool> ValidateNitterFallbackAsync(string rssUrl, string usernameHint, HttpClient client)
     {
         if (!_rssBridgeOptions.Value.EnableNitterFallback)
         {
@@ -347,6 +373,11 @@ public sealed class XFeedModule(
         }
 
         if (!TryExtractUsernameFromRssUrl(rssUrl, out var username))
+        {
+            username = usernameHint;
+        }
+
+        if (string.IsNullOrWhiteSpace(username))
         {
             return false;
         }

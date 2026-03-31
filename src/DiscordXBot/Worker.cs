@@ -81,7 +81,11 @@ public class Worker : BackgroundService
         var publishFailures = 0;
         var totalRetries = 0;
         var groupedFeeds = trackedFeeds
-            .GroupBy(x => x.XUsername, StringComparer.OrdinalIgnoreCase)
+            .GroupBy(x => new
+            {
+                x.Platform,
+                SourceKey = GetSourceKey(x)
+            })
             .ToList();
 
         using var publishLimiter = new SemaphoreSlim(Math.Max(1, _publishOptions.CurrentValue.MaxConcurrentPublishes));
@@ -90,18 +94,19 @@ public class Worker : BackgroundService
         foreach (var group in groupedFeeds)
         {
             var sampleFeed = group.First();
+            var feedLabel = GetFeedLabel(sampleFeed);
             IReadOnlyList<RssPost> posts;
 
             try
             {
                 posts = await FetchPostsWithRetryAsync(
-                    sampleFeed.RssUrl,
+                    sampleFeed,
                     _pollingOptions.CurrentValue.MaxItemsPerFeed,
                     cancellationToken);
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Failed to fetch RSS for @{Username}", sampleFeed.XUsername);
+                _logger.LogWarning(ex, "Failed to fetch RSS for {FeedLabel}", feedLabel);
                 continue;
             }
 
@@ -120,7 +125,7 @@ public class Worker : BackgroundService
                     _logger.LogInformation(
                         "Skipping tweet {TweetId} for @{Username}: media type {MediaType} is not allowed by image-only filter.",
                         post.TweetId,
-                        sampleFeed.XUsername,
+                        feedLabel,
                         parsed.MediaType);
                     continue;
                 }
@@ -216,7 +221,7 @@ public class Worker : BackgroundService
     }
 
     private async Task<IReadOnlyList<RssPost>> FetchPostsWithRetryAsync(
-        string rssUrl,
+        TrackedFeed trackedFeed,
         int maxItems,
         CancellationToken cancellationToken)
     {
@@ -227,7 +232,7 @@ public class Worker : BackgroundService
         {
             try
             {
-                return await _rssBridgeClient.GetPostsAsync(rssUrl, maxItems, cancellationToken);
+                return await _rssBridgeClient.GetPostsAsync(trackedFeed, maxItems, cancellationToken);
             }
             catch when (attempt < maxRetries)
             {
@@ -287,5 +292,16 @@ public class Worker : BackgroundService
     private static bool IsUniqueViolation(DbUpdateException ex)
     {
         return ex.InnerException is PostgresException { SqlState: "23505" };
+    }
+
+    private static string GetSourceKey(TrackedFeed feed)
+    {
+        return (feed.SourceKey ?? feed.XUsername ?? string.Empty).Trim().ToLowerInvariant();
+    }
+
+    private static string GetFeedLabel(TrackedFeed feed)
+    {
+        var sourceKey = string.IsNullOrWhiteSpace(feed.SourceKey) ? feed.XUsername : feed.SourceKey;
+        return $"{feed.Platform}:{sourceKey}";
     }
 }

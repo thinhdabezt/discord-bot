@@ -19,6 +19,16 @@ public sealed class BotDbContext(DbContextOptions<BotDbContext> options) : DbCon
                 .IsRequired()
                 .HasMaxLength(64);
 
+            entity.Property(x => x.SourceKey)
+                .IsRequired()
+                .HasMaxLength(256);
+
+            entity.Property(x => x.Platform)
+                .HasConversion<int>();
+
+            entity.Property(x => x.Provider)
+                .HasConversion<int>();
+
             entity.Property(x => x.RssUrl)
                 .IsRequired()
                 .HasMaxLength(1000);
@@ -29,8 +39,10 @@ public sealed class BotDbContext(DbContextOptions<BotDbContext> options) : DbCon
             entity.Property(x => x.UpdatedAtUtc)
                 .HasDefaultValueSql("CURRENT_TIMESTAMP AT TIME ZONE 'UTC'");
 
-            entity.HasIndex(x => new { x.GuildId, x.XUsername, x.ChannelId })
+            entity.HasIndex(x => new { x.GuildId, x.ChannelId, x.Platform, x.SourceKey })
                 .IsUnique();
+
+            entity.HasIndex(x => new { x.GuildId, x.Platform, x.SourceKey });
         });
 
         modelBuilder.Entity<ProcessedTweet>(entity =>

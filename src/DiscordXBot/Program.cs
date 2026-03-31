@@ -22,6 +22,10 @@ builder.Services
 	.Bind(builder.Configuration.GetSection(RssBridgeOptions.SectionName));
 
 builder.Services
+	.AddOptions<FeedProviderOptions>()
+	.Bind(builder.Configuration.GetSection(FeedProviderOptions.SectionName));
+
+builder.Services
 	.AddOptions<PollingOptions>()
 	.Bind(builder.Configuration.GetSection(PollingOptions.SectionName));
 
@@ -61,6 +65,7 @@ builder.Services.AddSingleton(provider =>
 			UseCompiledLambda = true
 		}));
 builder.Services.AddSingleton<RssBridgeClient>();
+builder.Services.AddSingleton<FeedUrlResolver>();
 builder.Services.AddSingleton<TweetContentParser>();
 builder.Services.AddSingleton<DiscordPublisher>();
 
