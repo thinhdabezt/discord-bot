@@ -5,6 +5,7 @@ using DiscordXBot.Services;
 using DiscordXBot.Services.Models;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
+using Npgsql;
 
 namespace DiscordXBot;
 
@@ -14,6 +15,7 @@ public class Worker : BackgroundService
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly IOptionsMonitor<PollingOptions> _pollingOptions;
     private readonly IOptionsMonitor<RetryOptions> _retryOptions;
+    private readonly IOptionsMonitor<PublishOptions> _publishOptions;
     private readonly RssBridgeClient _rssBridgeClient;
     private readonly TweetContentParser _tweetContentParser;
     private readonly DiscordPublisher _discordPublisher;
@@ -23,6 +25,7 @@ public class Worker : BackgroundService
         IServiceScopeFactory scopeFactory,
         IOptionsMonitor<PollingOptions> pollingOptions,
         IOptionsMonitor<RetryOptions> retryOptions,
+        IOptionsMonitor<PublishOptions> publishOptions,
         RssBridgeClient rssBridgeClient,
         TweetContentParser tweetContentParser,
         DiscordPublisher discordPublisher)
@@ -31,6 +34,7 @@ public class Worker : BackgroundService
         _scopeFactory = scopeFactory;
         _pollingOptions = pollingOptions;
         _retryOptions = retryOptions;
+        _publishOptions = publishOptions;
         _rssBridgeClient = rssBridgeClient;
         _tweetContentParser = tweetContentParser;
         _discordPublisher = discordPublisher;
@@ -72,9 +76,15 @@ public class Worker : BackgroundService
         }
 
         var totalPublished = 0;
+        var duplicateSkips = 0;
+        var publishFailures = 0;
+        var totalRetries = 0;
         var groupedFeeds = trackedFeeds
             .GroupBy(x => x.XUsername, StringComparer.OrdinalIgnoreCase)
             .ToList();
+
+        using var publishLimiter = new SemaphoreSlim(Math.Max(1, _publishOptions.CurrentValue.MaxConcurrentPublishes));
+        var interPublishDelayMs = Math.Max(0, _publishOptions.CurrentValue.InterPublishDelayMs);
 
         foreach (var group in groupedFeeds)
         {
@@ -113,12 +123,22 @@ public class Worker : BackgroundService
 
                     if (alreadyProcessed)
                     {
+                        duplicateSkips++;
                         continue;
                     }
 
-                    var published = await _discordPublisher.PublishAsync(feed, post, parsed, cancellationToken);
-                    if (!published)
+                    var publishResult = await PublishWithRetryAsync(
+                        publishLimiter,
+                        feed,
+                        post,
+                        parsed,
+                        cancellationToken);
+
+                    totalRetries += publishResult.RetryCount;
+
+                    if (!publishResult.Result.Success)
                     {
+                        publishFailures++;
                         continue;
                     }
 
@@ -139,14 +159,32 @@ public class Worker : BackgroundService
                     {
                         await db.SaveChangesAsync(cancellationToken);
                         totalPublished++;
+
+                        if (interPublishDelayMs > 0)
+                        {
+                            await Task.Delay(interPublishDelayMs, cancellationToken);
+                        }
                     }
                     catch (DbUpdateException ex)
                     {
-                        _logger.LogWarning(
-                            ex,
-                            "Skipping duplicate persistence for tweet {TweetId} and feed {FeedId}",
-                            post.TweetId,
-                            feed.Id);
+                        if (IsUniqueViolation(ex))
+                        {
+                            duplicateSkips++;
+                            _logger.LogInformation(
+                                ex,
+                                "Duplicate marker detected for tweet {TweetId} and feed {FeedId}",
+                                post.TweetId,
+                                feed.Id);
+                        }
+                        else
+                        {
+                            publishFailures++;
+                            _logger.LogError(
+                                ex,
+                                "Failed persisting ProcessedTweet for tweet {TweetId} and feed {FeedId}",
+                                post.TweetId,
+                                feed.Id);
+                        }
 
                         db.Entry(processed).State = EntityState.Detached;
                     }
@@ -155,10 +193,13 @@ public class Worker : BackgroundService
         }
 
         _logger.LogInformation(
-            "Polling cycle done. Feeds: {FeedCount}, Groups: {GroupCount}, Published: {PublishedCount}",
+            "Polling cycle done. Feeds: {FeedCount}, Groups: {GroupCount}, Published: {PublishedCount}, Duplicates: {DuplicateCount}, Failures: {FailureCount}, Retries: {RetryCount}",
             trackedFeeds.Count,
             groupedFeeds.Count,
-            totalPublished);
+            totalPublished,
+            duplicateSkips,
+            publishFailures,
+            totalRetries);
     }
 
     private async Task<IReadOnlyList<RssPost>> FetchPostsWithRetryAsync(
@@ -183,5 +224,55 @@ public class Worker : BackgroundService
         }
 
         return [];
+    }
+
+    private async Task<(PublishResult Result, int RetryCount)> PublishWithRetryAsync(
+        SemaphoreSlim limiter,
+        TrackedFeed feed,
+        RssPost post,
+        ParsedTweetContent parsed,
+        CancellationToken cancellationToken)
+    {
+        var maxRetries = Math.Max(0, _retryOptions.CurrentValue.PublishMaxRetries);
+        var initialDelaySeconds = Math.Max(1, _retryOptions.CurrentValue.InitialDelaySeconds);
+        var retries = 0;
+
+        for (var attempt = 0; attempt <= maxRetries; attempt++)
+        {
+            await limiter.WaitAsync(cancellationToken);
+            try
+            {
+                var result = await _discordPublisher.PublishAsync(feed, post, parsed, cancellationToken);
+                if (result.Success)
+                {
+                    return (result, retries);
+                }
+
+                if (!IsRetriableFailure(result.FailureKind) || attempt >= maxRetries)
+                {
+                    return (result, retries);
+                }
+            }
+            finally
+            {
+                limiter.Release();
+            }
+
+            retries++;
+            var delay = TimeSpan.FromSeconds(initialDelaySeconds * Math.Pow(2, attempt));
+            await Task.Delay(delay, cancellationToken);
+        }
+
+        return (PublishResult.Fail(PublishFailureKind.Fatal, "Retry budget exhausted"), retries);
+    }
+
+    private static bool IsRetriableFailure(PublishFailureKind failureKind)
+    {
+        return failureKind is PublishFailureKind.RateLimited or PublishFailureKind.Transient;
+    }
+
+    private static bool IsUniqueViolation(DbUpdateException ex)
+    {
+        return ex.InnerException is PostgresException { SqlState: "23505" };
     }
 }
