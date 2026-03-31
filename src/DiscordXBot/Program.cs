@@ -52,7 +52,14 @@ builder.Services.AddSingleton(_ => new DiscordSocketClient(new DiscordSocketConf
 	AlwaysDownloadUsers = false
 }));
 
-builder.Services.AddSingleton(provider => new InteractionService(provider.GetRequiredService<DiscordSocketClient>()));
+builder.Services.AddSingleton(provider =>
+	new InteractionService(
+		provider.GetRequiredService<DiscordSocketClient>(),
+		new InteractionServiceConfig
+		{
+			DefaultRunMode = RunMode.Sync,
+			UseCompiledLambda = true
+		}));
 builder.Services.AddSingleton<RssBridgeClient>();
 builder.Services.AddSingleton<TweetContentParser>();
 builder.Services.AddSingleton<DiscordPublisher>();

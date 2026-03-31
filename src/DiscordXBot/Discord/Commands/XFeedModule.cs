@@ -28,35 +28,44 @@ public sealed class XFeedModule(
     [SlashCommand("add-x", "Add an X account feed to a Discord channel")]
     public async Task AddXAsync(string username, ITextChannel channel)
     {
+        _logger.LogInformation("add-x started. Raw username={Username}, channelId={ChannelId}", username, channel.Id);
+
         if (!TryValidateGuildContext(out var guildUser))
         {
-            await RespondAsync("This command can only be used inside a guild.", ephemeral: true);
+            _logger.LogInformation("add-x aborted: not in guild context.");
+            await ReplyAsync("This command can only be used inside a guild.");
             return;
         }
 
         if (!HasManagementPermission(guildUser))
         {
-            await RespondAsync("You need Manage Server/Manage Channels permission to use this command.", ephemeral: true);
+            _logger.LogInformation("add-x denied: missing manage permissions for user {UserId}", guildUser.Id);
+            await ReplyAsync("You need Manage Server/Manage Channels permission to use this command.");
             return;
         }
 
         if (channel.GuildId != Context.Guild.Id)
         {
-            await RespondAsync("Target channel must belong to this guild.", ephemeral: true);
+            _logger.LogInformation("add-x aborted: target channel not in guild.");
+            await ReplyAsync("Target channel must belong to this guild.");
             return;
         }
 
         var normalizedUsername = NormalizeUsername(username);
         if (string.IsNullOrEmpty(normalizedUsername))
         {
-            await RespondAsync("Invalid X username.", ephemeral: true);
+            _logger.LogInformation("add-x aborted: invalid normalized username.");
+            await ReplyAsync("Invalid X username.");
             return;
         }
+
+        await EnsureDeferredAsync();
 
         var rssUrl = BuildRssUrl(normalizedUsername);
         if (!await ValidateRssAsync(rssUrl))
         {
-            await RespondAsync($"Unable to validate feed for @{normalizedUsername}. Check username or RSS-Bridge settings.", ephemeral: true);
+            _logger.LogInformation("add-x validation failed for @{Username}", normalizedUsername);
+            await ReplyAsync($"Unable to validate feed for @{normalizedUsername}. Check username or RSS-Bridge settings.");
             return;
         }
 
@@ -68,7 +77,8 @@ public sealed class XFeedModule(
 
         if (existing is not null)
         {
-            await RespondAsync($"@{normalizedUsername} is already tracked in {channel.Mention}.", ephemeral: true);
+            _logger.LogInformation("add-x no-op: mapping already exists for @{Username} in channel {ChannelId}", normalizedUsername, channelId);
+            await ReplyAsync($"@{normalizedUsername} is already tracked in {channel.Mention}.");
             return;
         }
 
@@ -96,11 +106,12 @@ public sealed class XFeedModule(
                 channelId,
                 normalizedUsername);
 
-            await RespondAsync($"@{normalizedUsername} is already tracked in {channel.Mention}.", ephemeral: true);
+            await ReplyAsync($"@{normalizedUsername} is already tracked in {channel.Mention}.");
             return;
         }
 
-        await RespondAsync($"Added @{normalizedUsername} to {channel.Mention}.", ephemeral: true);
+        await ReplyAsync($"Added @{normalizedUsername} to {channel.Mention}.");
+        _logger.LogInformation("add-x completed: mapped @{Username} to channel {ChannelId}", normalizedUsername, channelId);
     }
 
     [SlashCommand("list-x", "List tracked X accounts in this guild")]
@@ -108,9 +119,11 @@ public sealed class XFeedModule(
     {
         if (!TryValidateGuildContext(out _))
         {
-            await RespondAsync("This command can only be used inside a guild.", ephemeral: true);
+            await ReplyAsync("This command can only be used inside a guild.");
             return;
         }
+
+        await EnsureDeferredAsync();
 
         var guildId = unchecked((long)Context.Guild.Id);
         var feeds = await _db.TrackedFeeds
@@ -122,7 +135,7 @@ public sealed class XFeedModule(
 
         if (feeds.Count == 0)
         {
-            await RespondAsync("No X feeds are currently tracked in this guild.", ephemeral: true);
+            await ReplyAsync("No X feeds are currently tracked in this guild.");
             return;
         }
 
@@ -143,7 +156,7 @@ public sealed class XFeedModule(
             .WithCurrentTimestamp()
             .Build();
 
-        await RespondAsync(embed: embed, ephemeral: true);
+        await ReplyAsync(string.Empty, embed);
     }
 
     [SlashCommand("remove-x", "Remove tracked X feed mapping")]
@@ -151,22 +164,24 @@ public sealed class XFeedModule(
     {
         if (!TryValidateGuildContext(out var guildUser))
         {
-            await RespondAsync("This command can only be used inside a guild.", ephemeral: true);
+            await ReplyAsync("This command can only be used inside a guild.");
             return;
         }
 
         if (!HasManagementPermission(guildUser))
         {
-            await RespondAsync("You need Manage Server/Manage Channels permission to use this command.", ephemeral: true);
+            await ReplyAsync("You need Manage Server/Manage Channels permission to use this command.");
             return;
         }
 
         var normalizedUsername = NormalizeUsername(username);
         if (string.IsNullOrEmpty(normalizedUsername))
         {
-            await RespondAsync("Invalid X username.", ephemeral: true);
+            await ReplyAsync("Invalid X username.");
             return;
         }
+
+        await EnsureDeferredAsync();
 
         var guildId = unchecked((long)Context.Guild.Id);
         var query = _db.TrackedFeeds.Where(x =>
@@ -177,7 +192,7 @@ public sealed class XFeedModule(
         {
             if (channel.GuildId != Context.Guild.Id)
             {
-                await RespondAsync("Target channel must belong to this guild.", ephemeral: true);
+                await ReplyAsync("Target channel must belong to this guild.");
                 return;
             }
 
@@ -187,14 +202,55 @@ public sealed class XFeedModule(
         var feeds = await query.ToListAsync();
         if (feeds.Count == 0)
         {
-            await RespondAsync($"No tracked mapping found for @{normalizedUsername}.", ephemeral: true);
+            await ReplyAsync($"No tracked mapping found for @{normalizedUsername}.");
             return;
         }
 
         _db.TrackedFeeds.RemoveRange(feeds);
         await _db.SaveChangesAsync();
 
-        await RespondAsync($"Removed {feeds.Count} mapping(s) for @{normalizedUsername}.", ephemeral: true);
+        await ReplyAsync($"Removed {feeds.Count} mapping(s) for @{normalizedUsername}.");
+    }
+
+    private async Task ReplyAsync(string message, Embed? embed = null, bool ephemeral = true)
+    {
+        if (Context.Interaction.HasResponded)
+        {
+            if (embed is null)
+            {
+                await FollowupAsync(message, ephemeral: ephemeral);
+            }
+            else
+            {
+                await FollowupAsync(message, embed: embed, ephemeral: ephemeral);
+            }
+
+            return;
+        }
+
+        if (embed is null)
+        {
+            await RespondAsync(message, ephemeral: ephemeral);
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(message))
+        {
+            await RespondAsync(embed: embed, ephemeral: ephemeral);
+            return;
+        }
+
+        await RespondAsync(message, embed: embed, ephemeral: ephemeral);
+    }
+
+    private async Task EnsureDeferredAsync(bool ephemeral = true)
+    {
+        if (Context.Interaction.HasResponded)
+        {
+            return;
+        }
+
+        await DeferAsync(ephemeral: ephemeral);
     }
 
     private static bool HasManagementPermission(SocketGuildUser guildUser)

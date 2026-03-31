@@ -72,20 +72,74 @@ public sealed class InteractionHandlerHostedService(
         {
             using var scope = _serviceProvider.CreateScope();
             var context = new SocketInteractionContext(_client, interaction);
-            var result = await _interactionService.ExecuteCommandAsync(context, scope.ServiceProvider);
 
-            if (result.IsSuccess || interaction.HasResponded)
+            if (interaction is SocketSlashCommand slash)
+            {
+                _logger.LogInformation(
+                    "Received slash command {CommandName} from user {UserId} in guild {GuildId}",
+                    slash.Data.Name,
+                    slash.User.Id,
+                    slash.GuildId);
+
+                if (!interaction.HasResponded)
+                {
+                    await interaction.DeferAsync(ephemeral: true);
+                    _logger.LogInformation("Deferred slash command {CommandName} immediately.", slash.Data.Name);
+                }
+            }
+
+            _logger.LogInformation("Executing slash command handler.");
+            var executeTask = _interactionService.ExecuteCommandAsync(context, scope.ServiceProvider);
+            var completedTask = await Task.WhenAny(executeTask, Task.Delay(TimeSpan.FromSeconds(30)));
+
+            if (!ReferenceEquals(completedTask, executeTask))
+            {
+                _logger.LogError("Slash command execution timed out after 30 seconds.");
+
+                if (interaction.HasResponded)
+                {
+                    await interaction.FollowupAsync(
+                        "Command is taking too long to execute. Please try again in a moment.",
+                        ephemeral: true);
+                    return;
+                }
+
+                await interaction.RespondAsync(
+                    "Command is taking too long to execute. Please try again in a moment.",
+                    ephemeral: true);
+                return;
+            }
+
+            var result = await executeTask;
+            _logger.LogInformation("Slash command handler finished. Success={Success}", result.IsSuccess);
+
+            if (result.IsSuccess)
             {
                 return;
             }
 
-            await interaction.RespondAsync(
-                $"Command failed: {result.ErrorReason}",
-                ephemeral: true);
+            _logger.LogWarning(
+                "Slash command execution failed. Error: {Error}, Reason: {Reason}",
+                result.Error,
+                result.ErrorReason);
+
+            if (interaction.HasResponded)
+            {
+                await interaction.FollowupAsync($"Command failed: {result.ErrorReason}", ephemeral: true);
+                return;
+            }
+
+            await interaction.RespondAsync($"Command failed: {result.ErrorReason}", ephemeral: true);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Unhandled interaction execution error.");
+
+            if (interaction.HasResponded)
+            {
+                await interaction.FollowupAsync("An unexpected error occurred while processing the command.", ephemeral: true);
+                return;
+            }
 
             if (!interaction.HasResponded)
             {
