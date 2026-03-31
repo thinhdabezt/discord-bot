@@ -25,7 +25,20 @@ public sealed class RssBridgeClient(IHttpClientFactory httpClientFactory, ILogge
             return [];
         }
 
-        var posts = feed.Items
+        var filteredItems = feed.Items
+            .Where(item => !IsBridgeErrorItem(item))
+            .ToList();
+
+        var skippedErrorItems = feed.Items.Count() - filteredItems.Count;
+        if (skippedErrorItems > 0)
+        {
+            _logger.LogWarning(
+                "Skipped {Count} RSS-Bridge error item(s) from {RssUrl}",
+                skippedErrorItems,
+                rssUrl);
+        }
+
+        var posts = filteredItems
             .Select(MapItem)
             .Where(x => !string.IsNullOrWhiteSpace(x.TweetId))
             .Take(Math.Max(1, maxItems))
@@ -64,5 +77,18 @@ public sealed class RssBridgeClient(IHttpClientFactory httpClientFactory, ILogge
             Title: item.Title?.Text ?? string.Empty,
             SummaryHtml: summaryHtml,
             PublishedAtUtc: publishedAtUtc);
+    }
+
+    private static bool IsBridgeErrorItem(SyndicationItem item)
+    {
+        var title = item.Title?.Text ?? string.Empty;
+        var summary = item.Summary?.Text
+            ?? (item.Content as TextSyndicationContent)?.Text
+            ?? string.Empty;
+
+        return title.Contains("Bridge returned error", StringComparison.OrdinalIgnoreCase) ||
+               summary.Contains("Bridge returned error", StringComparison.OrdinalIgnoreCase) ||
+               summary.Contains("404 Page Not Found", StringComparison.OrdinalIgnoreCase) ||
+               summary.Contains("HttpException", StringComparison.OrdinalIgnoreCase);
     }
 }

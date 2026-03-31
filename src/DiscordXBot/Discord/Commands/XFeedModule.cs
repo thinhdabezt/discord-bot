@@ -288,10 +288,17 @@ public sealed class XFeedModule(
             {
                 using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
                 var client = _httpClientFactory.CreateClient();
-                using var response = await client.GetAsync(rssUrl, HttpCompletionOption.ResponseHeadersRead, cts.Token);
+                using var response = await client.GetAsync(rssUrl, HttpCompletionOption.ResponseContentRead, cts.Token);
 
                 if (response.IsSuccessStatusCode)
                 {
+                    var body = await response.Content.ReadAsStringAsync(cts.Token);
+                    if (LooksLikeBridgeErrorPayload(body))
+                    {
+                        _logger.LogWarning("RSS validation returned bridge error payload for URL {RssUrl}", rssUrl);
+                        return false;
+                    }
+
                     return true;
                 }
 
@@ -322,6 +329,19 @@ public sealed class XFeedModule(
         }
 
         return false;
+    }
+
+    private static bool LooksLikeBridgeErrorPayload(string payload)
+    {
+        if (string.IsNullOrWhiteSpace(payload))
+        {
+            return false;
+        }
+
+        return payload.Contains("Bridge returned error", StringComparison.OrdinalIgnoreCase) ||
+               payload.Contains("404 Page Not Found", StringComparison.OrdinalIgnoreCase) ||
+               payload.Contains("RSS-Bridge tried to fetch a page", StringComparison.OrdinalIgnoreCase) ||
+               payload.Contains("HttpException", StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool IsUniqueViolation(DbUpdateException ex)
