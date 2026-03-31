@@ -77,6 +77,7 @@ public class Worker : BackgroundService
 
         var totalPublished = 0;
         var duplicateSkips = 0;
+        var mediaFilteredSkips = 0;
         var publishFailures = 0;
         var totalRetries = 0;
         var groupedFeeds = trackedFeeds
@@ -112,6 +113,17 @@ public class Worker : BackgroundService
             foreach (var post in posts.OrderBy(x => x.PublishedAtUtc))
             {
                 var parsed = _tweetContentParser.Parse(post);
+
+                if (parsed.MediaType != ParsedMediaType.ImageOnly)
+                {
+                    mediaFilteredSkips += group.Count();
+                    _logger.LogInformation(
+                        "Skipping tweet {TweetId} for @{Username}: media type {MediaType} is not allowed by image-only filter.",
+                        post.TweetId,
+                        sampleFeed.XUsername,
+                        parsed.MediaType);
+                    continue;
+                }
 
                 foreach (var feed in group)
                 {
@@ -193,11 +205,12 @@ public class Worker : BackgroundService
         }
 
         _logger.LogInformation(
-            "Polling cycle done. Feeds: {FeedCount}, Groups: {GroupCount}, Published: {PublishedCount}, Duplicates: {DuplicateCount}, Failures: {FailureCount}, Retries: {RetryCount}",
+            "Polling cycle done. Feeds: {FeedCount}, Groups: {GroupCount}, Published: {PublishedCount}, Duplicates: {DuplicateCount}, MediaFiltered: {MediaFilteredCount}, Failures: {FailureCount}, Retries: {RetryCount}",
             trackedFeeds.Count,
             groupedFeeds.Count,
             totalPublished,
             duplicateSkips,
+            mediaFilteredSkips,
             publishFailures,
             totalRetries);
     }
