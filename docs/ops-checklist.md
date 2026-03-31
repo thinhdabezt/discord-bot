@@ -8,6 +8,8 @@
 
 ## Database
 - Verify latest EF migration has been applied
+- Create backup before applying new migration (`scripts/apply-migrations.ps1` does this by default)
+- Verify `tracked_feeds` schema contains `Platform`, `Provider`, and `SourceKey`
 - Confirm dedupe table growth is monitored
 - Set retention strategy for old `processed_tweets` rows
 

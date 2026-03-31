@@ -52,6 +52,23 @@ Run checks before deployment:
 
 This validates Docker availability, required variables, and compose config for prod profile.
 
+## Apply Database Migrations
+Apply migrations before starting or upgrading the bot runtime:
+
+```powershell
+.\scripts\apply-migrations.ps1 -Mode docker
+```
+
+If you need source-run mode:
+
+```powershell
+.\scripts\apply-migrations.ps1 -Mode source
+```
+
+Notes:
+- The script creates a backup dump under `backups/` unless `-SkipBackup` is provided.
+- Verify `tracked_feeds` columns include `Platform`, `Provider`, and `SourceKey` after apply.
+
 ## Deploy with Docker
 
 ```powershell
