@@ -18,7 +18,7 @@ public sealed class BotDbContextFactory : IDesignTimeDbContextFactory<BotDbConte
             .Build();
 
         var connectionString = config.GetConnectionString("Default")
-            ?? "Host=db.rmaitvguorarjzaifgkc.supabase.co;Port=5432;Database=postgres;Username=postgres;Password=Jm8jZRnFbe5Pi6sq;SSL Mode=Require;Trust Server Certificate=true";
+            ?? "Host=localhost;Port=55432;Database=discordbot;Username=postgres;Password=postgres";
 
         var optionsBuilder = new DbContextOptionsBuilder<BotDbContext>();
         optionsBuilder.UseNpgsql(connectionString);

@@ -7,12 +7,15 @@ using Discord;
 using Discord.Interactions;
 using Discord.WebSocket;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 
 var builder = Host.CreateApplicationBuilder(args);
 
 builder.Services
 	.AddOptions<DiscordOptions>()
-	.Bind(builder.Configuration.GetSection(DiscordOptions.SectionName));
+	.Bind(builder.Configuration.GetSection(DiscordOptions.SectionName))
+	.Validate(options => !string.IsNullOrWhiteSpace(options.Token), "Discord token is required")
+	.ValidateOnStart();
 
 builder.Services
 	.AddOptions<RssBridgeOptions>()
@@ -26,8 +29,18 @@ builder.Services
 	.AddOptions<RetryOptions>()
 	.Bind(builder.Configuration.GetSection(RetryOptions.SectionName));
 
-var connectionString = builder.Configuration.GetConnectionString("Default")
-	?? "Host=db.rmaitvguorarjzaifgkc.supabase.co;Port=5432;Database=postgres;Username=postgres;Password=Jm8jZRnFbe5Pi6sq;SSL Mode=Require;Trust Server Certificate=true";
+builder.Services
+	.AddOptions<PublishOptions>()
+	.Bind(builder.Configuration.GetSection(PublishOptions.SectionName));
+
+var connectionString = builder.Configuration.GetConnectionString("Default");
+if (string.IsNullOrWhiteSpace(connectionString))
+{
+	throw new OptionsValidationException(
+		"ConnectionStrings:Default",
+		typeof(string),
+		["Connection string is required. Set ConnectionStrings:Default via appsettings or environment variables."]);
+}
 
 builder.Services.AddDbContext<BotDbContext>(options => options.UseNpgsql(connectionString));
 

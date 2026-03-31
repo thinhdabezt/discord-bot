@@ -8,6 +8,7 @@ using Discord.Interactions;
 using Discord.WebSocket;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
+using Npgsql;
 
 namespace DiscordXBot.Discord.Commands;
 
@@ -15,11 +16,13 @@ public sealed class XFeedModule(
     BotDbContext db,
     IHttpClientFactory httpClientFactory,
     IOptions<RssBridgeOptions> rssBridgeOptions,
+    IOptions<RetryOptions> retryOptions,
     ILogger<XFeedModule> logger) : InteractionModuleBase<SocketInteractionContext>
 {
     private readonly BotDbContext _db = db;
     private readonly IHttpClientFactory _httpClientFactory = httpClientFactory;
     private readonly IOptions<RssBridgeOptions> _rssBridgeOptions = rssBridgeOptions;
+    private readonly IOptions<RetryOptions> _retryOptions = retryOptions;
     private readonly ILogger<XFeedModule> _logger = logger;
 
     [SlashCommand("add-x", "Add an X account feed to a Discord channel")]
@@ -80,7 +83,22 @@ public sealed class XFeedModule(
             UpdatedAtUtc = DateTime.UtcNow
         });
 
-        await _db.SaveChangesAsync();
+        try
+        {
+            await _db.SaveChangesAsync();
+        }
+        catch (DbUpdateException ex) when (IsUniqueViolation(ex))
+        {
+            _logger.LogInformation(
+                ex,
+                "Duplicate feed mapping prevented for guild {GuildId}, channel {ChannelId}, username {Username}",
+                guildId,
+                channelId,
+                normalizedUsername);
+
+            await RespondAsync($"@{normalizedUsername} is already tracked in {channel.Mention}.", ephemeral: true);
+            return;
+        }
 
         await RespondAsync($"Added @{normalizedUsername} to {channel.Mention}.", ephemeral: true);
     }
@@ -110,7 +128,13 @@ public sealed class XFeedModule(
 
         var lines = feeds
             .Select(x => $"- @{x.XUsername} -> <#{x.ChannelId}>")
-            .Take(30);
+            .Take(25)
+            .ToList();
+
+        if (feeds.Count > lines.Count)
+        {
+            lines.Add($"... and {feeds.Count - lines.Count} more");
+        }
 
         var embed = new EmbedBuilder()
             .WithTitle("Tracked X Feeds")
@@ -151,6 +175,12 @@ public sealed class XFeedModule(
 
         if (channel is not null)
         {
+            if (channel.GuildId != Context.Guild.Id)
+            {
+                await RespondAsync("Target channel must belong to this guild.", ephemeral: true);
+                return;
+            }
+
             query = query.Where(x => x.ChannelId == unchecked((long)channel.Id));
         }
 
@@ -193,18 +223,54 @@ public sealed class XFeedModule(
 
     private async Task<bool> ValidateRssAsync(string rssUrl)
     {
-        try
+        var maxRetries = Math.Max(0, _retryOptions.Value.MaxRetries);
+        var initialDelaySeconds = Math.Max(1, _retryOptions.Value.InitialDelaySeconds);
+
+        for (var attempt = 0; attempt <= maxRetries; attempt++)
         {
-            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-            var client = _httpClientFactory.CreateClient();
-            using var response = await client.GetAsync(rssUrl, HttpCompletionOption.ResponseHeadersRead, cts.Token);
-            return response.IsSuccessStatusCode;
+            try
+            {
+                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+                var client = _httpClientFactory.CreateClient();
+                using var response = await client.GetAsync(rssUrl, HttpCompletionOption.ResponseHeadersRead, cts.Token);
+
+                if (response.IsSuccessStatusCode)
+                {
+                    return true;
+                }
+
+                if ((int)response.StatusCode >= 500 && attempt < maxRetries)
+                {
+                    var delay = TimeSpan.FromSeconds(initialDelaySeconds * Math.Pow(2, attempt));
+                    await Task.Delay(delay);
+                    continue;
+                }
+
+                return false;
+            }
+            catch (OperationCanceledException) when (attempt < maxRetries)
+            {
+                var delay = TimeSpan.FromSeconds(initialDelaySeconds * Math.Pow(2, attempt));
+                await Task.Delay(delay);
+            }
+            catch (HttpRequestException) when (attempt < maxRetries)
+            {
+                var delay = TimeSpan.FromSeconds(initialDelaySeconds * Math.Pow(2, attempt));
+                await Task.Delay(delay);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "RSS validation failed for URL {RssUrl}", rssUrl);
+                return false;
+            }
         }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "RSS validation failed for URL {RssUrl}", rssUrl);
-            return false;
-        }
+
+        return false;
+    }
+
+    private static bool IsUniqueViolation(DbUpdateException ex)
+    {
+        return ex.InnerException is PostgresException { SqlState: "23505" };
     }
 
     private static string NormalizeUsername(string input)
