@@ -17,7 +17,6 @@ public sealed class XFeedModule(
     BotDbContext db,
     IHttpClientFactory httpClientFactory,
     IOptions<RssBridgeOptions> rssBridgeOptions,
-    IOptionsMonitor<FeedProviderOptions> feedProviderOptions,
     IOptions<RetryOptions> retryOptions,
     FeedUrlResolver feedUrlResolver,
     ILogger<XFeedModule> logger) : InteractionModuleBase<SocketInteractionContext>
@@ -25,7 +24,6 @@ public sealed class XFeedModule(
     private readonly BotDbContext _db = db;
     private readonly IHttpClientFactory _httpClientFactory = httpClientFactory;
     private readonly IOptions<RssBridgeOptions> _rssBridgeOptions = rssBridgeOptions;
-    private readonly IOptionsMonitor<FeedProviderOptions> _feedProviderOptions = feedProviderOptions;
     private readonly IOptions<RetryOptions> _retryOptions = retryOptions;
     private readonly FeedUrlResolver _feedUrlResolver = feedUrlResolver;
     private readonly ILogger<XFeedModule> _logger = logger;
