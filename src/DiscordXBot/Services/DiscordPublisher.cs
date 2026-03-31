@@ -192,7 +192,7 @@ public sealed class DiscordPublisher(
                ex.Message.Contains("URL_TYPE_INVALID_URL", StringComparison.OrdinalIgnoreCase);
     }
 
-    private static string BuildMessageText(string username, string caption, DateTime postedAtUtc, string? postUrl)
+    internal static string BuildMessageText(string username, string caption, DateTime postedAtUtc, string? postUrl)
     {
         var safeCaption = string.IsNullOrWhiteSpace(caption) ? "(empty)" : caption.Trim();
         var safeLink = string.IsNullOrWhiteSpace(postUrl) ? "N/A" : postUrl;
