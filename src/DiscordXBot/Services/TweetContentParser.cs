@@ -29,6 +29,9 @@ public sealed class TweetContentParser
             .Select(x => x.GetAttributeValue("src", string.Empty))
             .Where(x => !string.IsNullOrWhiteSpace(x))
             .Select(NormalizeImageUrl)
+            .Select(DiscordUrlSanitizer.Sanitize)
+            .Where(x => x is not null)
+            .Cast<string>()
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList() ?? [];
 

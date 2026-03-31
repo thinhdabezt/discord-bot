@@ -23,7 +23,15 @@ public sealed class DiscordPublisher(
         ParsedTweetContent content,
         CancellationToken cancellationToken)
     {
-        var channel = _client.GetChannel(unchecked((ulong)feed.ChannelId)) as IMessageChannel;
+        var channelId = unchecked((ulong)feed.ChannelId);
+        var channel = _client.GetChannel(channelId) as IMessageChannel;
+
+        if (channel is null)
+        {
+            var requestOptions = new RequestOptions { CancelToken = cancellationToken };
+            channel = await _client.GetChannelAsync(channelId, requestOptions) as IMessageChannel;
+        }
+
         if (channel is null)
         {
             _logger.LogWarning(
@@ -35,36 +43,90 @@ public sealed class DiscordPublisher(
 
         try
         {
+            var sanitizedPostUrl = DiscordUrlSanitizer.Sanitize(post.Url);
+            if (sanitizedPostUrl is null && !string.IsNullOrWhiteSpace(post.Url))
+            {
+                _logger.LogWarning(
+                    "Skipping invalid post URL for tweet {TweetId}: {PostUrl}",
+                    post.TweetId,
+                    post.Url);
+            }
+
+            var sanitizedImages = content.ImageUrls
+                .Select(DiscordUrlSanitizer.Sanitize)
+                .Where(x => x is not null)
+                .Cast<string>()
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            var droppedImageCount = content.ImageUrls.Count - sanitizedImages.Count;
+            if (droppedImageCount > 0)
+            {
+                _logger.LogWarning(
+                    "Dropped {DroppedCount} invalid image URL(s) for tweet {TweetId}",
+                    droppedImageCount,
+                    post.TweetId);
+            }
+
             var embedBuilder = new EmbedBuilder()
                 .WithAuthor($"@{feed.XUsername}")
                 .WithDescription(content.Caption)
                 .WithColor(new Color(29, 161, 242))
                 .WithCurrentTimestamp();
 
-            if (!string.IsNullOrWhiteSpace(post.Url))
+            if (sanitizedPostUrl is not null)
             {
-                embedBuilder.WithUrl(post.Url);
+                embedBuilder.WithUrl(sanitizedPostUrl);
             }
 
-            if (content.ImageUrls.Count > 0)
+            if (sanitizedImages.Count > 0)
             {
-                embedBuilder.WithImageUrl(content.ImageUrls[0]);
+                embedBuilder.WithImageUrl(sanitizedImages[0]);
             }
 
             var requestOptions = new RequestOptions { CancelToken = cancellationToken };
-            await channel.SendMessageAsync(embed: embedBuilder.Build(), options: requestOptions);
+            try
+            {
+                await channel.SendMessageAsync(embed: embedBuilder.Build(), options: requestOptions);
+            }
+            catch (HttpException ex) when (IsInvalidUrlPayload(ex))
+            {
+                _logger.LogWarning(
+                    ex,
+                    "Invalid URL payload for tweet {TweetId}. Falling back to text-only publish. PostUrl={PostUrl}, FirstImage={FirstImage}",
+                    post.TweetId,
+                    sanitizedPostUrl,
+                    sanitizedImages.FirstOrDefault());
+
+                var fallbackText = BuildFallbackText(feed.XUsername, content.Caption, sanitizedPostUrl);
+                await channel.SendMessageAsync(text: fallbackText, options: requestOptions);
+
+                // Main message fallback already sent; skip additional image embeds for this post.
+                sanitizedImages.Clear();
+            }
 
             var maxAdditionalImages = Math.Max(0, _publishOptions.CurrentValue.MaxAdditionalImages);
 
             // Send additional images as separate embeds to preserve ordering and avoid giant messages.
-            foreach (var image in content.ImageUrls.Skip(1).Take(maxAdditionalImages))
+            foreach (var image in sanitizedImages.Skip(1).Take(maxAdditionalImages))
             {
                 var extraEmbed = new EmbedBuilder()
                     .WithColor(new Color(29, 161, 242))
                     .WithImageUrl(image)
                     .Build();
 
-                await channel.SendMessageAsync(embed: extraEmbed, options: requestOptions);
+                try
+                {
+                    await channel.SendMessageAsync(embed: extraEmbed, options: requestOptions);
+                }
+                catch (HttpException ex) when (IsInvalidUrlPayload(ex))
+                {
+                    _logger.LogWarning(
+                        ex,
+                        "Skipping invalid additional image URL for tweet {TweetId}: {ImageUrl}",
+                        post.TweetId,
+                        image);
+                }
             }
 
             _logger.LogInformation(
@@ -120,5 +182,35 @@ public sealed class DiscordPublisher(
                 feed.ChannelId);
             return PublishResult.Fail(PublishFailureKind.Fatal, ex.Message);
         }
+    }
+
+    private static bool IsInvalidUrlPayload(HttpException ex)
+    {
+        return (int)ex.HttpCode == 400 &&
+               ex.Message.Contains("URL_TYPE_INVALID_URL", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string BuildFallbackText(string username, string caption, string? postUrl)
+    {
+        var parts = new List<string> { $"@{username}" };
+
+        if (!string.IsNullOrWhiteSpace(caption))
+        {
+            parts.Add(caption);
+        }
+
+        if (!string.IsNullOrWhiteSpace(postUrl))
+        {
+            parts.Add(postUrl);
+        }
+
+        var text = string.Join("\n", parts);
+
+        if (text.Length > 1900)
+        {
+            return text[..1900] + "...";
+        }
+
+        return text;
     }
 }

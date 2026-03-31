@@ -57,4 +57,36 @@ public class TweetContentParserTests
         Assert.Equal(3903, result.Caption.Length);
         Assert.EndsWith("...", result.Caption, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public void Parse_FiltersInvalidImageUrls()
+    {
+        var post = new RssPost(
+            TweetId: "tweet-4",
+            Url: "https://x.com/u/status/4",
+            Title: "Caption",
+            SummaryHtml: "<img src='not-a-url'/><img src='ftp://example.com/a.jpg'/><img src='https://pbs.twimg.com/media/c.jpg:small'/>",
+            PublishedAtUtc: DateTime.UtcNow);
+
+        var result = _parser.Parse(post);
+
+        Assert.Single(result.ImageUrls);
+        Assert.Equal("https://pbs.twimg.com/media/c.jpg:orig", result.ImageUrls[0]);
+    }
+
+    [Fact]
+    public void Parse_FiltersInternalHostImageUrls()
+    {
+        var post = new RssPost(
+            TweetId: "tweet-5",
+            Url: "https://x.com/u/status/5",
+            Title: "Caption",
+            SummaryHtml: "<img src='http://rss-bridge/image.jpg'/><img src='https://pbs.twimg.com/media/d.jpg:small'/>",
+            PublishedAtUtc: DateTime.UtcNow);
+
+        var result = _parser.Parse(post);
+
+        Assert.Single(result.ImageUrls);
+        Assert.Equal("https://pbs.twimg.com/media/d.jpg:orig", result.ImageUrls[0]);
+    }
 }
