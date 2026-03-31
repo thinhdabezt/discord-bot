@@ -5,6 +5,7 @@ using DiscordXBot.Data.Entities;
 using DiscordXBot.Services.Models;
 using Microsoft.Extensions.Options;
 using DiscordXBot.Configuration;
+using System.Globalization;
 
 namespace DiscordXBot.Services;
 
@@ -68,26 +69,28 @@ public sealed class DiscordPublisher(
                     post.TweetId);
             }
 
-            var embedBuilder = new EmbedBuilder()
-                .WithAuthor($"@{feed.XUsername}")
-                .WithDescription(content.Caption)
-                .WithColor(new Color(29, 161, 242))
-                .WithCurrentTimestamp();
-
-            if (sanitizedPostUrl is not null)
-            {
-                embedBuilder.WithUrl(sanitizedPostUrl);
-            }
-
-            if (sanitizedImages.Count > 0)
-            {
-                embedBuilder.WithImageUrl(sanitizedImages[0]);
-            }
+            var messageText = BuildMessageText(
+                feed.XUsername,
+                content.Caption,
+                content.PostedAtUtc,
+                sanitizedPostUrl);
 
             var requestOptions = new RequestOptions { CancelToken = cancellationToken };
             try
             {
-                await channel.SendMessageAsync(embed: embedBuilder.Build(), options: requestOptions);
+                if (sanitizedImages.Count > 0)
+                {
+                    var embed = new EmbedBuilder()
+                        .WithColor(new Color(29, 161, 242))
+                        .WithImageUrl(sanitizedImages[0])
+                        .Build();
+
+                    await channel.SendMessageAsync(text: messageText, embed: embed, options: requestOptions);
+                }
+                else
+                {
+                    await channel.SendMessageAsync(text: messageText, options: requestOptions);
+                }
             }
             catch (HttpException ex) when (IsInvalidUrlPayload(ex))
             {
@@ -98,8 +101,7 @@ public sealed class DiscordPublisher(
                     sanitizedPostUrl,
                     sanitizedImages.FirstOrDefault());
 
-                var fallbackText = BuildFallbackText(feed.XUsername, content.Caption, sanitizedPostUrl);
-                await channel.SendMessageAsync(text: fallbackText, options: requestOptions);
+                await channel.SendMessageAsync(text: messageText, options: requestOptions);
 
                 // Main message fallback already sent; skip additional image embeds for this post.
                 sanitizedImages.Clear();
@@ -190,21 +192,17 @@ public sealed class DiscordPublisher(
                ex.Message.Contains("URL_TYPE_INVALID_URL", StringComparison.OrdinalIgnoreCase);
     }
 
-    private static string BuildFallbackText(string username, string caption, string? postUrl)
+    private static string BuildMessageText(string username, string caption, DateTime postedAtUtc, string? postUrl)
     {
-        var parts = new List<string> { $"@{username}" };
+        var safeCaption = string.IsNullOrWhiteSpace(caption) ? "(empty)" : caption.Trim();
+        var safeLink = string.IsNullOrWhiteSpace(postUrl) ? "N/A" : postUrl;
 
-        if (!string.IsNullOrWhiteSpace(caption))
-        {
-            parts.Add(caption);
-        }
-
-        if (!string.IsNullOrWhiteSpace(postUrl))
-        {
-            parts.Add(postUrl);
-        }
-
-        var text = string.Join("\n", parts);
+        var text = string.Join(
+            "\n",
+            $"X: @{username}",
+            $"Caption: {safeCaption}",
+            $"Posted: {postedAtUtc.ToUniversalTime().ToString("yyyy-MM-dd HH:mm:ss 'UTC'", CultureInfo.InvariantCulture)}",
+            $"Link: {safeLink}");
 
         if (text.Length > 1900)
         {
