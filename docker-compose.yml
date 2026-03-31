@@ -29,6 +29,42 @@ services:
       timeout: 10s
       retries: 3
 
+  redis:
+    image: redis:7-alpine
+    container_name: discord-bot-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    profiles:
+      - prod
+
+  rsshub:
+    image: diygod/rsshub:latest
+    container_name: rsshub
+    restart: unless-stopped
+    ports:
+      - "1200:1200"
+    environment:
+      NODE_ENV: production
+      CACHE_TYPE: redis
+      REDIS_URL: redis://redis:6379
+      PUPPETEER_SKIP_CHROMIUM_DOWNLOAD: "true"
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://localhost:1200/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    profiles:
+      - prod
+
   bot:
     build:
       context: .
@@ -40,11 +76,20 @@ services:
         condition: service_healthy
       rss-bridge:
         condition: service_healthy
+      redis:
+        condition: service_healthy
+      rsshub:
+        condition: service_healthy
     environment:
       DISCORD__TOKEN: ${DISCORD_TOKEN}
       DISCORD__DEVGUILDID: ${DISCORD_GUILD_ID}
       CONNECTIONSTRINGS__DEFAULT: Host=db;Port=5432;Database=${POSTGRES_DB:-discordbot};Username=${POSTGRES_USER:-postgres};Password=${POSTGRES_PASSWORD:-postgres}
       RSSBRIDGE__BASEURL: http://rss-bridge:80
+      FEEDPROVIDERS__ENABLEDIRECTRSS: ${FEEDPROVIDERS__ENABLEDIRECTRSS:-true}
+      FEEDPROVIDERS__ENABLERSSHUB: ${FEEDPROVIDERS__ENABLERSSHUB:-false}
+      FEEDPROVIDERS__RSSHUBBASEURL: ${FEEDPROVIDERS__RSSHUBBASEURL:-http://rsshub:1200}
+      FEEDPROVIDERS__DEFAULTXPROVIDER: ${FEEDPROVIDERS__DEFAULTXPROVIDER:-RssBridge}
+      FEEDPROVIDERS__DEFAULTFACEBOOKPROVIDER: ${FEEDPROVIDERS__DEFAULTFACEBOOKPROVIDER:-RssHub}
       POLLING__INTERVALMINUTES: ${POLLING__INTERVALMINUTES:-10}
       POLLING__MAXITEMSPERFEED: ${POLLING__MAXITEMSPERFEED:-5}
       RETRY__MAXRETRIES: ${RETRY__MAXRETRIES:-3}

@@ -42,6 +42,25 @@ catch {
 }
 
 try {
+    $statusText = ($status | Out-String)
+    if ($statusText -match "rsshub") {
+        $rssHub = Invoke-WebRequest -Uri "http://localhost:1200" -TimeoutSec 10 -UseBasicParsing
+        if ($rssHub.StatusCode -eq 200) {
+            Pass "RSSHub endpoint is reachable"
+        }
+        else {
+            Fail "RSSHub endpoint returned status $($rssHub.StatusCode)"
+        }
+    }
+    else {
+        Info "RSSHub service not enabled in this profile"
+    }
+}
+catch {
+    Fail "RSSHub endpoint is not reachable"
+}
+
+try {
     $logs = docker compose --profile $Profile logs bot --tail 120
     $logs | Out-Host
 

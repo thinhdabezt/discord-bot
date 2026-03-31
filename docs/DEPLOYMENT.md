@@ -77,6 +77,7 @@ After deployment:
 Manual checks:
 - Slash commands are visible in target guild
 - /add-x persists feed mapping
+- /add-fb and /add-link persist feed mapping
 - New tweet is published once only
 
 ## Logs and Diagnostics
@@ -85,6 +86,8 @@ Manual checks:
 docker compose --profile prod logs -f bot
 docker compose --profile prod logs -f db
 docker compose --profile prod logs -f rss-bridge
+docker compose --profile prod logs -f rsshub
+docker compose --profile prod logs -f redis
 ```
 
 ## Rollback

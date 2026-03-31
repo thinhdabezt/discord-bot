@@ -81,6 +81,23 @@ foreach ($name in $recommendedVars) {
     }
 }
 
+$enableRssHub = $false
+if ($envMap.ContainsKey("FEEDPROVIDERS__ENABLERSSHUB")) {
+    $enableRssHub = $envMap["FEEDPROVIDERS__ENABLERSSHUB"].ToLowerInvariant() -eq "true"
+}
+
+if ($enableRssHub) {
+    if ($envMap.ContainsKey("FEEDPROVIDERS__RSSHUBBASEURL") -and -not [string]::IsNullOrWhiteSpace($envMap["FEEDPROVIDERS__RSSHUBBASEURL"])) {
+        Pass "RSSHub enabled and FEEDPROVIDERS__RSSHUBBASEURL is set"
+    }
+    else {
+        Fail "RSSHub enabled but FEEDPROVIDERS__RSSHUBBASEURL is missing"
+    }
+}
+else {
+    Info "RSSHub provider disabled (FEEDPROVIDERS__ENABLERSSHUB=false)"
+}
+
 $portChecks = @(3000, 55432)
 foreach ($p in $portChecks) {
     $inUse = Get-NetTCPConnection -LocalPort $p -State Listen -ErrorAction SilentlyContinue

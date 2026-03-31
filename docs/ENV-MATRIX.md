@@ -19,6 +19,11 @@ This matrix documents which variables are required for each deployment mode.
 | RSSBRIDGE__BASEURL | No | Yes | http://localhost:3000 | http://localhost:3000 | In docker-prod the bot uses internal URL from compose. |
 | RSSBRIDGE__ENABLENITTERFALLBACK | Optional | Optional | true | true | If enabled, bot falls back to Nitter RSS when TwitterBridge returns synthetic error items. |
 | RSSBRIDGE__NITTERBASEURL | Optional | Optional | https://nitter.net | https://nitter.net | Base URL for Nitter fallback endpoint. |
+| FEEDPROVIDERS__ENABLEDIRECTRSS | Optional | Optional | true | true | Enables tracking direct RSS URLs (for example FetchRSS). |
+| FEEDPROVIDERS__ENABLERSSHUB | Optional | Optional | false | true | Enables RSSHub provider usage for new feed registrations. |
+| FEEDPROVIDERS__RSSHUBBASEURL | Optional | Optional | http://rsshub:1200 | http://rsshub:1200 | RSSHub base URL used by resolver for X/FB feeds. |
+| FEEDPROVIDERS__DEFAULTXPROVIDER | Optional | Optional | RssBridge | RssBridge | Default provider for /add-x command. |
+| FEEDPROVIDERS__DEFAULTFACEBOOKPROVIDER | Optional | Optional | RssHub | RssHub | Default provider for /add-fb command. |
 | POLLING__INTERVALMINUTES | Optional | Optional | 10 | 10 | Polling interval in minutes. |
 | POLLING__MAXITEMSPERFEED | Optional | Optional | 5 | 5 | Max feed items fetched each cycle. |
 | RETRY__MAXRETRIES | Optional | Optional | 3 | 3 | Retry count for RSS fetch path. |

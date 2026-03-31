@@ -186,7 +186,16 @@ public sealed class FeedLinkModule(
         await EnsureDeferredAsync();
 
         var guildId = unchecked((long)Context.Guild.Id);
-        var normalizedUrl = rssUrl.Trim();
+        string normalizedUrl;
+        try
+        {
+            normalizedUrl = _feedUrlResolver.Resolve(FeedPlatform.X, FeedProvider.DirectRss, rssUrl);
+        }
+        catch
+        {
+            await ReplyAsync("Invalid RSS URL. Please provide an absolute http/https URL.");
+            return;
+        }
 
         var query = _db.TrackedFeeds.Where(x =>
             x.GuildId == guildId &&
