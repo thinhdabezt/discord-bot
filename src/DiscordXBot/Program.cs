@@ -1,5 +1,7 @@
 using DiscordXBot;
 using DiscordXBot.Configuration;
+using DiscordXBot.Data;
+using Microsoft.EntityFrameworkCore;
 
 var builder = Host.CreateApplicationBuilder(args);
 
@@ -18,6 +20,11 @@ builder.Services
 builder.Services
 	.AddOptions<RetryOptions>()
 	.Bind(builder.Configuration.GetSection(RetryOptions.SectionName));
+
+var connectionString = builder.Configuration.GetConnectionString("Default")
+	?? "Host=localhost;Port=5432;Database=discordbot;Username=postgres;Password=postgres";
+
+builder.Services.AddDbContext<BotDbContext>(options => options.UseNpgsql(connectionString));
 
 builder.Services.AddHostedService<Worker>();
 
