@@ -1,4 +1,6 @@
 using System.Text.RegularExpressions;
+using System.ServiceModel.Syndication;
+using System.Xml;
 using Discord;
 using Discord.Interactions;
 using Discord.WebSocket;
@@ -372,10 +374,55 @@ public sealed class FacebookFeedModule(
             return false;
         }
 
-        return payload.Contains("Bridge returned error", StringComparison.OrdinalIgnoreCase) ||
-               payload.Contains("404 Page Not Found", StringComparison.OrdinalIgnoreCase) ||
-               payload.Contains("HttpException", StringComparison.OrdinalIgnoreCase) ||
-               payload.Contains("Not Found", StringComparison.OrdinalIgnoreCase);
+        var hasKnownErrorMarker = payload.Contains("Bridge returned error", StringComparison.OrdinalIgnoreCase) ||
+                                  payload.Contains("404 Page Not Found", StringComparison.OrdinalIgnoreCase) ||
+                                  payload.Contains("HttpException", StringComparison.OrdinalIgnoreCase) ||
+                                  payload.Contains("Not Found", StringComparison.OrdinalIgnoreCase);
+
+        if (!hasKnownErrorMarker)
+        {
+            return false;
+        }
+
+        return !HasUsableFeedItems(payload);
+    }
+
+    private static bool HasUsableFeedItems(string payload)
+    {
+        try
+        {
+            using var textReader = new StringReader(payload);
+            using var xmlReader = XmlReader.Create(textReader, new XmlReaderSettings { DtdProcessing = DtdProcessing.Ignore });
+            var feed = SyndicationFeed.Load(xmlReader);
+            if (feed?.Items is null)
+            {
+                return false;
+            }
+
+            foreach (var item in feed.Items)
+            {
+                var title = item.Title?.Text ?? string.Empty;
+                var summary = item.Summary?.Text
+                    ?? (item.Content as TextSyndicationContent)?.Text
+                    ?? string.Empty;
+
+                var isBridgeError = title.Contains("Bridge returned error", StringComparison.OrdinalIgnoreCase) ||
+                                    summary.Contains("Bridge returned error", StringComparison.OrdinalIgnoreCase) ||
+                                    summary.Contains("404 Page Not Found", StringComparison.OrdinalIgnoreCase) ||
+                                    summary.Contains("HttpException", StringComparison.OrdinalIgnoreCase);
+
+                if (!isBridgeError)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     private static string NormalizeFanpageSource(string input)
