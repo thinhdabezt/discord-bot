@@ -119,11 +119,11 @@ public class Worker : BackgroundService
             {
                 var parsed = _tweetContentParser.Parse(post, sampleFeed.Platform);
 
-                if (parsed.MediaType != ParsedMediaType.ImageOnly)
+                if (!IsAllowedByMediaPolicy(sampleFeed, parsed.MediaType))
                 {
                     mediaFilteredSkips += group.Count();
                     _logger.LogInformation(
-                        "Skipping post {PostId} for source {FeedLabel}: media type {MediaType} is not allowed by image-only filter.",
+                        "Skipping post {PostId} for source {FeedLabel}: media type {MediaType} is blocked by media policy.",
                         post.TweetId,
                         feedLabel,
                         parsed.MediaType);
@@ -292,6 +292,18 @@ public class Worker : BackgroundService
     private static bool IsUniqueViolation(DbUpdateException ex)
     {
         return ex.InnerException is PostgresException { SqlState: "23505" };
+    }
+
+    private static bool IsAllowedByMediaPolicy(TrackedFeed feed, ParsedMediaType mediaType)
+    {
+        if (feed.Platform == FeedPlatform.X)
+        {
+            // Keep existing strict behavior for X feeds.
+            return mediaType == ParsedMediaType.ImageOnly;
+        }
+
+        // Fanpage/direct RSS paths can publish caption and mixed posts.
+        return mediaType is ParsedMediaType.ImageOnly or ParsedMediaType.CaptionOnly or ParsedMediaType.Mixed;
     }
 
     private static string GetSourceKey(TrackedFeed feed)
