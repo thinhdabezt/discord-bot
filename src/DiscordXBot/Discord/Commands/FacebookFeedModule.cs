@@ -90,7 +90,7 @@ public sealed class FacebookFeedModule(
             return;
         }
 
-        if (!await ValidateRssAsync(rssUrl))
+        if (!await ValidateRssAsync(rssUrl, selectedProvider))
         {
             await ReplyAsync($"Unable to validate fanpage feed for {sourceKey}.");
             return;
@@ -256,7 +256,7 @@ public sealed class FacebookFeedModule(
         };
     }
 
-    private async Task<bool> ValidateRssAsync(string rssUrl)
+    private async Task<bool> ValidateRssAsync(string rssUrl, FeedProvider provider)
     {
         var maxRetries = Math.Max(0, _retryOptions.Value.MaxRetries);
         var initialDelaySeconds = Math.Max(1, _retryOptions.Value.InitialDelaySeconds);
@@ -271,6 +271,13 @@ public sealed class FacebookFeedModule(
 
                 if (response.IsSuccessStatusCode)
                 {
+                    if (provider == FeedProvider.RssBridge)
+                    {
+                        // RSS-Bridge may return mixed entries (error + usable entries) for Facebook pages.
+                        // For command-level validation, a successful response is sufficient.
+                        return true;
+                    }
+
                     var body = await response.Content.ReadAsStringAsync(cts.Token);
                     if (LooksLikeErrorPayload(body))
                     {
