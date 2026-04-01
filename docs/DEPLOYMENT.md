@@ -116,7 +116,7 @@ After you run `/add-fb` and `/add-link` with real test inputs, verify persisted 
 ```
 
 This script checks:
-- `tracked_feeds` contains RSSHub fanpage mapping (`Platform=Facebook`, `Provider=RssHub`)
+- `tracked_feeds` contains fanpage mapping (`Platform=Facebook`, `Provider=RssHub` or `Provider=RssBridge`)
 - `tracked_feeds` contains direct RSS mapping (`Provider=DirectRss`)
 - `processed_tweets` contains publish evidence for the configured lookback window
 - bot logs include publish activity pattern

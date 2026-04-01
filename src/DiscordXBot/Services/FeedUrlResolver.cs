@@ -54,13 +54,14 @@ public sealed class FeedUrlResolver(
 
     private string ResolveRssBridge(FeedPlatform platform, string source)
     {
-        if (platform != FeedPlatform.X)
-        {
-            throw new InvalidOperationException("RSS-Bridge provider currently supports X platform only.");
-        }
-
         var baseUrl = _rssBridgeOptions.CurrentValue.BaseUrl.TrimEnd('/');
-        return $"{baseUrl}/?action=display&bridge=TwitterBridge&context=By+username&u={Uri.EscapeDataString(source)}&format=Atom";
+
+        return platform switch
+        {
+            FeedPlatform.X => $"{baseUrl}/?action=display&bridge=TwitterBridge&context=By+username&u={Uri.EscapeDataString(source)}&format=Atom",
+            FeedPlatform.Facebook => $"{baseUrl}/?action=display&bridge=FacebookBridge&context=User&u={Uri.EscapeDataString(source)}&media_type=all&format=Atom",
+            _ => throw new NotSupportedException($"Unsupported platform: {platform}")
+        };
     }
 
     private static string ResolveDirectRss(string source)

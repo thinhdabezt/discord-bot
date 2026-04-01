@@ -56,9 +56,9 @@ public sealed class FacebookFeedModule(
         }
 
         var selectedProvider = ParseProvider(provider) ?? _feedProviderOptions.CurrentValue.DefaultFacebookProvider;
-        if (selectedProvider == FeedProvider.RssBridge || selectedProvider == FeedProvider.DirectRss)
+        if (selectedProvider == FeedProvider.DirectRss)
         {
-            await ReplyAsync("/add-fb currently supports RSSHub fanpage feeds only. Use /add-link for direct FetchRSS URLs.");
+            await ReplyAsync("/add-fb supports RSSHub or RSS-Bridge fanpage feeds. Use /add-link for direct FetchRSS URLs.");
             return;
         }
 
