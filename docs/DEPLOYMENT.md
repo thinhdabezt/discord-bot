@@ -108,6 +108,19 @@ The smoke script now verifies:
 - Active feed summary grouped by `Platform` and `Provider`
 - Slash command registration summary contains: `add-x/list-x/remove-x`, `add-fb/list-fb/remove-fb`, `add-link/list-links/remove-link`
 
+## Integration Evidence (Fanpage + Direct RSS)
+After you run `/add-fb` and `/add-link` with real test inputs, verify persisted mapping and publish evidence:
+
+```powershell
+.\scripts\integration-evidence.ps1 -ComposeMode prod -FanpageSource nasa -DirectRssUrl "https://example.com/feed.xml" -LookbackMinutes 180
+```
+
+This script checks:
+- `tracked_feeds` contains RSSHub fanpage mapping (`Platform=Facebook`, `Provider=RssHub`)
+- `tracked_feeds` contains direct RSS mapping (`Provider=DirectRss`)
+- `processed_tweets` contains publish evidence for the configured lookback window
+- bot logs include publish activity pattern
+
 ## Logs and Diagnostics
 
 ```powershell

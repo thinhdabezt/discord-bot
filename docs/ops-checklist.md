@@ -20,6 +20,7 @@
 - Run preflight script before each release
 - Run smoke test script after each release
 - Confirm smoke test output contains slash command registration summary for `add-x`, `add-fb`, and `add-link` command families
+- Run `scripts/integration-evidence.ps1` after real `/add-fb` and `/add-link` setup to verify DB + publish evidence
 
 ## Deployment Artifacts
 - Confirm [docs/ENV-MATRIX.md](docs/ENV-MATRIX.md) is up to date with current config shape
