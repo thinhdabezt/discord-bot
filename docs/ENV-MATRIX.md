@@ -30,6 +30,18 @@ This matrix documents which variables are required for each deployment mode.
 | FEEDPROVIDERS__FACEBOOKPROFILEALERTCOOLDOWNMINUTES | Optional | Optional | 180 | 180 | Minimum minutes between repeated alerts for the same profile source. |
 | FB_COOKIE | Optional | Optional | empty | c_user=...;xs=... | Cookie used by RSSHub for Facebook personal profile routes. Keep secret. |
 | FB_PAGES_LIMIT | Optional | Optional | 3 | 3 | RSSHub fetch page limit for Facebook routes to reduce aggressive crawling. |
+| APIFYFALLBACK__ENABLED | Optional | Optional | false | true | Enables Apify fallback when Facebook RSS providers fail repeatedly. |
+| APIFYFALLBACK__APIBASEURL | Optional | Optional | https://api.apify.com/v2 | https://api.apify.com/v2 | Base URL for Apify API endpoints. |
+| APIFYFALLBACK__APITOKEN | Optional | Optional | empty | apify_api_... | API token for running Apify actor. Keep secret. |
+| APIFYFALLBACK__ACTORID | Optional | Optional | apify/facebook-posts-scraper | apify/facebook-posts-scraper | Actor identifier used for fallback scraping. |
+| APIFYFALLBACK__RESULTSLIMIT | Optional | Optional | 5 | 5 | Maximum items requested per fallback run. |
+| APIFYFALLBACK__REQUESTTIMEOUTSECONDS | Optional | Optional | 45 | 45 | Timeout budget for one fallback run lifecycle. |
+| APIFYFALLBACK__POLLINTERVALSECONDS | Optional | Optional | 5 | 5 | Poll interval for asynchronous actor run status. |
+| APIFYFALLBACK__MAXPOLLATTEMPTS | Optional | Optional | 24 | 24 | Maximum run status poll attempts before aborting fallback. |
+| APIFYFALLBACK__FAILURETHRESHOLD | Optional | Optional | 3 | 3 | Consecutive primary fetch failures required before triggering fallback. |
+| APIFYFALLBACK__COOLDOWNMINUTES | Optional | Optional | 180 | 180 | Minimum minutes between fallback attempts per source. |
+| APIFYFALLBACK__ENABLEFORFANPAGE | Optional | Optional | true | true | Enables Apify fallback for Facebook fanpage sources. |
+| APIFYFALLBACK__ENABLEFORPROFILE | Optional | Optional | true | true | Enables Apify fallback for Facebook profile sources. |
 | POLLING__INTERVALMINUTES | Optional | Optional | 10 | 10 | Polling interval in minutes. |
 | POLLING__MAXITEMSPERFEED | Optional | Optional | 5 | 5 | Max feed items fetched each cycle. |
 | RETRY__MAXRETRIES | Optional | Optional | 3 | 3 | Retry count for RSS fetch path. |

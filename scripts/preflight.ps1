@@ -91,6 +91,11 @@ if ($envMap.ContainsKey("FEEDPROVIDERS__ENABLEFACEBOOKPROFILEALERTS")) {
     $enableProfileAlerts = $envMap["FEEDPROVIDERS__ENABLEFACEBOOKPROFILEALERTS"].ToLowerInvariant() -eq "true"
 }
 
+$enableApifyFallback = $false
+if ($envMap.ContainsKey("APIFYFALLBACK__ENABLED")) {
+    $enableApifyFallback = $envMap["APIFYFALLBACK__ENABLED"].ToLowerInvariant() -eq "true"
+}
+
 if ($enableRssHub) {
     if ($envMap.ContainsKey("FEEDPROVIDERS__RSSHUBBASEURL") -and -not [string]::IsNullOrWhiteSpace($envMap["FEEDPROVIDERS__RSSHUBBASEURL"])) {
         Pass "RSSHub enabled and FEEDPROVIDERS__RSSHUBBASEURL is set"
@@ -125,6 +130,22 @@ if ($enableProfileAlerts) {
     }
     else {
         Fail "Profile alerts enabled but FB_COOKIE is missing"
+    }
+}
+
+if ($enableApifyFallback) {
+    if ($envMap.ContainsKey("APIFYFALLBACK__APITOKEN") -and -not [string]::IsNullOrWhiteSpace($envMap["APIFYFALLBACK__APITOKEN"])) {
+        Pass "Apify fallback enabled and APIFYFALLBACK__APITOKEN is set"
+    }
+    else {
+        Fail "Apify fallback enabled but APIFYFALLBACK__APITOKEN is missing"
+    }
+
+    if ($envMap.ContainsKey("APIFYFALLBACK__ACTORID") -and -not [string]::IsNullOrWhiteSpace($envMap["APIFYFALLBACK__ACTORID"])) {
+        Pass "Apify fallback actor id is set"
+    }
+    else {
+        Fail "Apify fallback enabled but APIFYFALLBACK__ACTORID is missing"
     }
 }
 

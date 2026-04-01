@@ -161,6 +161,22 @@ Alert behavior:
 - Once threshold is reached, bot sends a warning to admin alert channel.
 - Cooldown prevents alert spam for the same profile source.
 
+## Apify Fallback For Facebook Sources
+To recover posts when RSSHub/RSS-Bridge fail repeatedly for Facebook fanpage/profile sources, configure:
+- `APIFYFALLBACK__ENABLED=true`
+- `APIFYFALLBACK__APITOKEN=<apify_api_token>`
+- `APIFYFALLBACK__ACTORID=apify/facebook-posts-scraper`
+
+Optional cost controls:
+- `APIFYFALLBACK__FAILURETHRESHOLD=3`
+- `APIFYFALLBACK__COOLDOWNMINUTES=180`
+- `APIFYFALLBACK__RESULTSLIMIT=5`
+
+Behavior:
+- Fallback only triggers after consecutive primary provider failures reach threshold.
+- Fallback is rate-limited per source by cooldown.
+- Fallback works for both fanpage and profile when corresponding `APIFYFALLBACK__ENABLEFOR*` flags are true.
+
 ## Logs and Diagnostics
 
 ```powershell

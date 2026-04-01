@@ -24,6 +24,7 @@
 - Run `scripts/integration-evidence.ps1` after real `/add-fb` and `/add-link` setup to verify DB + publish evidence
 - For profile sources, verify `/add-fb` uses numeric ID with `sourceType=profile` and evidence script uses `-FacebookSourceType profile`
 - If profile alerts are enabled, verify `FEEDPROVIDERS__FACEBOOKPROFILEALERTCHANNELID` points to an admin-only channel
+- If Apify fallback is enabled, verify `APIFYFALLBACK__APITOKEN` is set and monitor fallback call frequency against budget
 
 ## Deployment Artifacts
 - Confirm [docs/ENV-MATRIX.md](docs/ENV-MATRIX.md) is up to date with current config shape
@@ -34,6 +35,7 @@
 - Track publish success/failure ratio daily
 - Alert on sustained fetch failures per username
 - Alert on repeated Facebook profile fetch issues (403/error-only/empty after prior success) and rotate FB cookie when triggered
+- Alert on unusual spikes of Apify fallback attempts per source (may indicate upstream RSS breakage)
 - Alert when bot disconnects from gateway repeatedly
 
 ## Recovery

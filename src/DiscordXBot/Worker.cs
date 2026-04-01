@@ -18,10 +18,13 @@ public class Worker : BackgroundService
     private readonly IOptionsMonitor<RetryOptions> _retryOptions;
     private readonly IOptionsMonitor<PublishOptions> _publishOptions;
     private readonly IOptionsMonitor<FeedProviderOptions> _feedProviderOptions;
+    private readonly IOptionsMonitor<ApifyFallbackOptions> _apifyFallbackOptions;
     private readonly RssBridgeClient _rssBridgeClient;
+    private readonly ApifyFacebookClient _apifyFacebookClient;
     private readonly TweetContentParser _tweetContentParser;
     private readonly DiscordPublisher _discordPublisher;
     private readonly ConcurrentDictionary<string, ProfileFetchHealthState> _profileFetchHealth = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, FacebookFallbackState> _facebookFallbackState = new(StringComparer.OrdinalIgnoreCase);
 
     public Worker(
         ILogger<Worker> logger,
@@ -31,6 +34,8 @@ public class Worker : BackgroundService
         IOptionsMonitor<PublishOptions> publishOptions,
         IOptionsMonitor<FeedProviderOptions> feedProviderOptions,
         RssBridgeClient rssBridgeClient,
+        IOptionsMonitor<ApifyFallbackOptions> apifyFallbackOptions,
+        ApifyFacebookClient apifyFacebookClient,
         TweetContentParser tweetContentParser,
         DiscordPublisher discordPublisher)
     {
@@ -40,7 +45,9 @@ public class Worker : BackgroundService
         _retryOptions = retryOptions;
         _publishOptions = publishOptions;
         _feedProviderOptions = feedProviderOptions;
+        _apifyFallbackOptions = apifyFallbackOptions;
         _rssBridgeClient = rssBridgeClient;
+        _apifyFacebookClient = apifyFacebookClient;
         _tweetContentParser = tweetContentParser;
         _discordPublisher = discordPublisher;
     }
@@ -102,6 +109,7 @@ public class Worker : BackgroundService
             var sampleFeed = group.First();
             var feedLabel = GetFeedLabel(sampleFeed);
             FeedFetchResult fetchResult;
+            FeedFetchResult effectiveFetchResult;
 
             try
             {
@@ -110,10 +118,16 @@ public class Worker : BackgroundService
                     _pollingOptions.CurrentValue.MaxItemsPerFeed,
                     cancellationToken);
 
+                effectiveFetchResult = await TryApplyFacebookFallbackAsync(
+                    sampleFeed,
+                    fetchResult,
+                    _pollingOptions.CurrentValue.MaxItemsPerFeed,
+                    cancellationToken);
+
                 await EvaluateProfileHealthAsync(
                     db,
                     sampleFeed,
-                    fetchResult,
+                    effectiveFetchResult,
                     cancellationToken);
             }
             catch (Exception ex)
@@ -122,7 +136,7 @@ public class Worker : BackgroundService
                 continue;
             }
 
-            var posts = fetchResult.Posts;
+            var posts = effectiveFetchResult.Posts;
 
             if (posts.Count == 0)
             {
@@ -255,6 +269,90 @@ public class Worker : BackgroundService
         }
 
         return FeedFetchResult.NetworkError("Fetch retry budget exhausted.");
+    }
+
+    private async Task<FeedFetchResult> TryApplyFacebookFallbackAsync(
+        TrackedFeed sampleFeed,
+        FeedFetchResult primaryResult,
+        int maxItems,
+        CancellationToken cancellationToken)
+    {
+        if (sampleFeed.Platform != FeedPlatform.Facebook)
+        {
+            return primaryResult;
+        }
+
+        var stateKey = GetFacebookFallbackStateKey(sampleFeed);
+        var state = _facebookFallbackState.GetOrAdd(stateKey, _ => new FacebookFallbackState());
+
+        if (primaryResult.Outcome == FeedFetchOutcome.Success && primaryResult.Posts.Count > 0)
+        {
+            state.ConsecutivePrimaryFailures = 0;
+            return primaryResult;
+        }
+
+        if (!ShouldConsiderFallbackOutcome(primaryResult.Outcome))
+        {
+            return primaryResult;
+        }
+
+        var options = _apifyFallbackOptions.CurrentValue;
+        if (!options.Enabled || string.IsNullOrWhiteSpace(options.ApiToken))
+        {
+            return primaryResult;
+        }
+
+        if ((sampleFeed.SourceType == FacebookSourceType.Fanpage && !options.EnableForFanpage) ||
+            (sampleFeed.SourceType == FacebookSourceType.Profile && !options.EnableForProfile))
+        {
+            return primaryResult;
+        }
+
+        state.ConsecutivePrimaryFailures++;
+
+        var threshold = Math.Max(1, options.FailureThreshold);
+        if (state.ConsecutivePrimaryFailures < threshold)
+        {
+            return primaryResult;
+        }
+
+        var cooldownMinutes = Math.Max(5, options.CooldownMinutes);
+        var utcNow = DateTime.UtcNow;
+        if (state.LastFallbackAttemptUtc != default &&
+            utcNow - state.LastFallbackAttemptUtc < TimeSpan.FromMinutes(cooldownMinutes))
+        {
+            return primaryResult;
+        }
+
+        state.LastFallbackAttemptUtc = utcNow;
+        var fallbackPosts = await _apifyFacebookClient.FetchPostsAsync(sampleFeed, maxItems, cancellationToken);
+        if (fallbackPosts.Count == 0)
+        {
+            _logger.LogWarning(
+                "Apify fallback returned no posts for source {FeedLabel}. PrimaryOutcome={PrimaryOutcome}",
+                GetFeedLabel(sampleFeed),
+                GetFetchOutcomeLabel(primaryResult.Outcome));
+            return primaryResult;
+        }
+
+        state.ConsecutivePrimaryFailures = 0;
+
+        _logger.LogInformation(
+            "Using Apify fallback for source {FeedLabel}. PrimaryOutcome={PrimaryOutcome}, FallbackPosts={Count}",
+            GetFeedLabel(sampleFeed),
+            GetFetchOutcomeLabel(primaryResult.Outcome),
+            fallbackPosts.Count);
+
+        return FeedFetchResult.Success(fallbackPosts);
+    }
+
+    private static bool ShouldConsiderFallbackOutcome(FeedFetchOutcome outcome)
+    {
+        return outcome is FeedFetchOutcome.HttpForbidden
+            or FeedFetchOutcome.HttpError
+            or FeedFetchOutcome.NetworkError
+            or FeedFetchOutcome.ParseError
+            or FeedFetchOutcome.ErrorOnly;
     }
 
     private async Task EvaluateProfileHealthAsync(
@@ -410,6 +508,12 @@ public class Worker : BackgroundService
         return $"{feed.Platform}:{feed.SourceType}:{source}";
     }
 
+    private static string GetFacebookFallbackStateKey(TrackedFeed feed)
+    {
+        var source = GetSourceKey(feed);
+        return $"fb-fallback:{feed.SourceType}:{source}";
+    }
+
     private async Task<(PublishResult Result, int RetryCount)> PublishWithRetryAsync(
         SemaphoreSlim limiter,
         TrackedFeed feed,
@@ -493,5 +597,11 @@ public class Worker : BackgroundService
         public int ConsecutiveFailures { get; set; }
         public bool HasHistoricalSuccess { get; set; }
         public DateTime LastAlertAtUtc { get; set; }
+    }
+
+    private sealed class FacebookFallbackState
+    {
+        public int ConsecutivePrimaryFailures { get; set; }
+        public DateTime LastFallbackAttemptUtc { get; set; }
     }
 }
