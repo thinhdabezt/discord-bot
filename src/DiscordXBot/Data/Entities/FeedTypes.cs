@@ -6,6 +6,12 @@ public enum FeedPlatform
     Facebook = 1
 }
 
+public enum FacebookSourceType
+{
+    Fanpage = 0,
+    Profile = 1
+}
+
 public enum FeedProvider
 {
     RssBridge = 0,

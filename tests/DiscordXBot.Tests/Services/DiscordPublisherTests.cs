@@ -1,4 +1,5 @@
 using DiscordXBot.Services;
+using DiscordXBot.Data.Entities;
 
 namespace DiscordXBot.Tests.Services;
 
@@ -8,9 +9,15 @@ public class DiscordPublisherTests
     public void BuildMessageText_FormatsPlainTextWithUtcAndLink()
     {
         var postedAtUtc = new DateTime(2026, 01, 02, 03, 04, 05, DateTimeKind.Utc);
+        var feed = new TrackedFeed
+        {
+            Platform = FeedPlatform.X,
+            SourceKey = "medrives1338",
+            XUsername = "medrives1338"
+        };
 
         var text = DiscordPublisher.BuildMessageText(
-            username: "medrives1338",
+            feed: feed,
             caption: "Hello world",
             postedAtUtc: postedAtUtc,
             postUrl: "https://x.com/medrives1338/status/1");
@@ -27,9 +34,15 @@ public class DiscordPublisherTests
     public void BuildMessageText_UsesFallbacksForEmptyCaptionAndMissingLink()
     {
         var postedAtUtc = new DateTime(2026, 01, 02, 03, 04, 05, DateTimeKind.Utc);
+        var feed = new TrackedFeed
+        {
+            Platform = FeedPlatform.X,
+            SourceKey = "medrives1338",
+            XUsername = "medrives1338"
+        };
 
         var text = DiscordPublisher.BuildMessageText(
-            username: "medrives1338",
+            feed: feed,
             caption: "   ",
             postedAtUtc: postedAtUtc,
             postUrl: null);
@@ -47,15 +60,45 @@ public class DiscordPublisherTests
     {
         var postedAtUtc = new DateTime(2026, 01, 02, 03, 04, 05, DateTimeKind.Utc);
         var longCaption = new string('x', 4000);
+        var feed = new TrackedFeed
+        {
+            Platform = FeedPlatform.X,
+            SourceKey = "medrives1338",
+            XUsername = "medrives1338"
+        };
 
         var text = DiscordPublisher.BuildMessageText(
-            username: "medrives1338",
+            feed: feed,
             caption: longCaption,
             postedAtUtc: postedAtUtc,
             postUrl: "https://x.com/medrives1338/status/1");
 
         Assert.True(text.Length <= 1903);
         Assert.EndsWith("...", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void BuildMessageText_FormatsFacebookFanpageHeader()
+    {
+        var postedAtUtc = new DateTime(2026, 01, 02, 03, 04, 05, DateTimeKind.Utc);
+        var feed = new TrackedFeed
+        {
+            Platform = FeedPlatform.Facebook,
+            SourceKey = "nasa"
+        };
+
+        var text = DiscordPublisher.BuildMessageText(
+            feed: feed,
+            caption: "Fanpage update",
+            postedAtUtc: postedAtUtc,
+            postUrl: "https://facebook.com/nasa/posts/1");
+
+        Assert.Equal(
+            "FB Fanpage: nasa\n" +
+            "Caption: Fanpage update\n" +
+            "Posted: 2026-01-02 03:04:05 UTC\n" +
+            "Link: https://facebook.com/nasa/posts/1",
+            text);
     }
 
     [Fact]

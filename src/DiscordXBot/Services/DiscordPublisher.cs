@@ -72,7 +72,7 @@ public sealed class DiscordPublisher(
             }
 
             var messageText = BuildMessageText(
-                feed.XUsername,
+                feed,
                 content.Caption,
                 content.PostedAtUtc,
                 publicPostUrl);
@@ -174,14 +174,15 @@ public sealed class DiscordPublisher(
                ex.Message.Contains("URL_TYPE_INVALID_URL", StringComparison.OrdinalIgnoreCase);
     }
 
-    internal static string BuildMessageText(string username, string caption, DateTime postedAtUtc, string? postUrl)
+    internal static string BuildMessageText(TrackedFeed feed, string caption, DateTime postedAtUtc, string? postUrl)
     {
         var safeCaption = string.IsNullOrWhiteSpace(caption) ? "(empty)" : caption.Trim();
         var safeLink = string.IsNullOrWhiteSpace(postUrl) ? "N/A" : postUrl;
+        var sourceLine = BuildSourceLine(feed);
 
         var text = string.Join(
             "\n",
-            $"X: @{username}",
+            sourceLine,
             $"Caption: {safeCaption}",
             $"Posted: {postedAtUtc.ToUniversalTime().ToString("yyyy-MM-dd HH:mm:ss 'UTC'", CultureInfo.InvariantCulture)}",
             $"Link: {safeLink}");
@@ -192,6 +193,18 @@ public sealed class DiscordPublisher(
         }
 
         return text;
+    }
+
+    private static string BuildSourceLine(TrackedFeed feed)
+    {
+        if (feed.Platform == FeedPlatform.Facebook)
+        {
+            var fanpage = string.IsNullOrWhiteSpace(feed.SourceKey) ? "unknown" : feed.SourceKey;
+            return $"FB Fanpage: {fanpage}";
+        }
+
+        var username = string.IsNullOrWhiteSpace(feed.SourceKey) ? feed.XUsername : feed.SourceKey;
+        return $"X: @{username}";
     }
 
     internal static string? NormalizePostUrlForDisplay(string? postUrl)

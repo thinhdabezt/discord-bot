@@ -23,7 +23,7 @@ This matrix documents which variables are required for each deployment mode.
 | FEEDPROVIDERS__ENABLERSSHUB | Optional | Optional | false | true | Enables RSSHub provider usage for new feed registrations. |
 | FEEDPROVIDERS__RSSHUBBASEURL | Optional | Optional | http://rsshub:1200 | http://rsshub:1200 | RSSHub base URL used by resolver for X/FB feeds. |
 | FEEDPROVIDERS__DEFAULTXPROVIDER | Optional | Optional | RssBridge | RssBridge | Default provider for /add-x command. |
-| FEEDPROVIDERS__DEFAULTFACEBOOKPROVIDER | Optional | Optional | RssHub | RssHub | Default provider for /add-fb command. |
+| FEEDPROVIDERS__DEFAULTFACEBOOKPROVIDER | Optional | Optional | RssHub | RssHub | Default provider for /add-fb fanpage command path. |
 | POLLING__INTERVALMINUTES | Optional | Optional | 10 | 10 | Polling interval in minutes. |
 | POLLING__MAXITEMSPERFEED | Optional | Optional | 5 | 5 | Max feed items fetched each cycle. |
 | RETRY__MAXRETRIES | Optional | Optional | 3 | 3 | Retry count for RSS fetch path. |

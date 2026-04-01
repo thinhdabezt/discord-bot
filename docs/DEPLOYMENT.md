@@ -100,7 +100,7 @@ If the bot was restarted earlier than the default log window, increase it:
 Manual checks:
 - Slash commands are visible in target guild
 - /add-x persists feed mapping
-- /add-fb and /add-link persist feed mapping
+- /add-fb (fanpage) and /add-link persist feed mapping
 - New tweet is published once only
 
 The smoke script now verifies:

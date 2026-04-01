@@ -81,13 +81,29 @@ public sealed class FeedUrlResolver(
 
     private string ResolveRssHub(FeedPlatform platform, string source)
     {
-        var baseUrl = _feedProviderOptions.CurrentValue.RssHubBaseUrl.TrimEnd('/');
-
         return platform switch
         {
-            FeedPlatform.X => $"{baseUrl}/twitter/user/{Uri.EscapeDataString(source)}",
-            FeedPlatform.Facebook => $"{baseUrl}/facebook/page/{Uri.EscapeDataString(source)}",
+            FeedPlatform.X => ResolveXViaRssHub(source),
+            FeedPlatform.Facebook => ResolveFacebookViaRssHub(source, FacebookSourceType.Fanpage),
             _ => throw new NotSupportedException($"Unsupported platform: {platform}")
+        };
+    }
+
+    private string ResolveXViaRssHub(string source)
+    {
+        var baseUrl = _feedProviderOptions.CurrentValue.RssHubBaseUrl.TrimEnd('/');
+        return $"{baseUrl}/twitter/user/{Uri.EscapeDataString(source)}";
+    }
+
+    private string ResolveFacebookViaRssHub(string source, FacebookSourceType sourceType)
+    {
+        var baseUrl = _feedProviderOptions.CurrentValue.RssHubBaseUrl.TrimEnd('/');
+
+        return sourceType switch
+        {
+            FacebookSourceType.Fanpage => $"{baseUrl}/facebook/page/{Uri.EscapeDataString(source)}",
+            FacebookSourceType.Profile => throw new NotSupportedException("Facebook profile route is reserved for a future phase."),
+            _ => throw new NotSupportedException($"Unsupported Facebook source type: {sourceType}")
         };
     }
 }

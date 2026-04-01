@@ -27,8 +27,8 @@ public sealed class FacebookFeedModule(
     private readonly FeedUrlResolver _feedUrlResolver = feedUrlResolver;
     private readonly ILogger<FacebookFeedModule> _logger = logger;
 
-    [SlashCommand("add-fb", "Add a Facebook page feed to a Discord channel")]
-    public async Task AddFacebookAsync(string pageOrId, ITextChannel channel, string? provider = null)
+    [SlashCommand("add-fb", "Add a Facebook fanpage feed to a Discord channel")]
+    public async Task AddFacebookAsync(string fanpageOrId, ITextChannel channel, string? provider = null)
     {
         if (!TryValidateGuildContext(out var guildUser))
         {
@@ -48,17 +48,17 @@ public sealed class FacebookFeedModule(
             return;
         }
 
-        var sourceKey = NormalizeFacebookSource(pageOrId);
+        var sourceKey = NormalizeFanpageSource(fanpageOrId);
         if (string.IsNullOrWhiteSpace(sourceKey))
         {
-            await ReplyAsync("Invalid Facebook page/id.");
+            await ReplyAsync("Invalid Facebook fanpage handle/id.");
             return;
         }
 
         var selectedProvider = ParseProvider(provider) ?? _feedProviderOptions.CurrentValue.DefaultFacebookProvider;
         if (selectedProvider == FeedProvider.RssBridge || selectedProvider == FeedProvider.DirectRss)
         {
-            await ReplyAsync("/add-fb currently supports RSSHub provider only. Use /add-link for direct FetchRSS URLs.");
+            await ReplyAsync("/add-fb currently supports RSSHub fanpage feeds only. Use /add-link for direct FetchRSS URLs.");
             return;
         }
 
@@ -77,14 +77,14 @@ public sealed class FacebookFeedModule(
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to resolve Facebook RSS URL for source {SourceKey}", sourceKey);
+            _logger.LogWarning(ex, "Failed to resolve Facebook fanpage RSS URL for source {SourceKey}", sourceKey);
             await ReplyAsync("Unable to construct RSS URL from current provider settings.");
             return;
         }
 
         if (!await ValidateRssAsync(rssUrl))
         {
-            await ReplyAsync($"Unable to validate Facebook feed for {sourceKey}.");
+            await ReplyAsync($"Unable to validate fanpage feed for {sourceKey}.");
             return;
         }
 
@@ -123,15 +123,15 @@ public sealed class FacebookFeedModule(
         }
         catch (DbUpdateException ex) when (IsUniqueViolation(ex))
         {
-            _logger.LogInformation(ex, "Duplicate Facebook mapping prevented for source {SourceKey}", sourceKey);
+            _logger.LogInformation(ex, "Duplicate Facebook fanpage mapping prevented for source {SourceKey}", sourceKey);
             await ReplyAsync($"{sourceKey} is already tracked in {channel.Mention}.");
             return;
         }
 
-        await ReplyAsync($"Added Facebook source {sourceKey} to {channel.Mention} via {selectedProvider}.");
+        await ReplyAsync($"Added Facebook fanpage {sourceKey} to {channel.Mention} via {selectedProvider}.");
     }
 
-    [SlashCommand("list-fb", "List tracked Facebook feeds in this guild")]
+    [SlashCommand("list-fb", "List tracked Facebook fanpage feeds in this guild")]
     public async Task ListFacebookAsync()
     {
         if (!TryValidateGuildContext(out _))
@@ -152,7 +152,7 @@ public sealed class FacebookFeedModule(
 
         if (feeds.Count == 0)
         {
-            await ReplyAsync("No Facebook feeds are currently tracked in this guild.");
+            await ReplyAsync("No Facebook fanpage feeds are currently tracked in this guild.");
             return;
         }
 
@@ -167,7 +167,7 @@ public sealed class FacebookFeedModule(
         }
 
         var embed = new EmbedBuilder()
-            .WithTitle("Tracked Facebook Feeds")
+            .WithTitle("Tracked Facebook Fanpages")
             .WithColor(new Color(66, 103, 178))
             .WithDescription(string.Join("\n", lines))
             .WithCurrentTimestamp()
@@ -176,8 +176,8 @@ public sealed class FacebookFeedModule(
         await ReplyAsync(string.Empty, embed);
     }
 
-    [SlashCommand("remove-fb", "Remove tracked Facebook feed mapping")]
-    public async Task RemoveFacebookAsync(string pageOrId, ITextChannel? channel = null)
+    [SlashCommand("remove-fb", "Remove tracked Facebook fanpage feed mapping")]
+    public async Task RemoveFacebookAsync(string fanpageOrId, ITextChannel? channel = null)
     {
         if (!TryValidateGuildContext(out var guildUser))
         {
@@ -191,10 +191,10 @@ public sealed class FacebookFeedModule(
             return;
         }
 
-        var sourceKey = NormalizeFacebookSource(pageOrId);
+        var sourceKey = NormalizeFanpageSource(fanpageOrId);
         if (string.IsNullOrWhiteSpace(sourceKey))
         {
-            await ReplyAsync("Invalid Facebook page/id.");
+            await ReplyAsync("Invalid Facebook fanpage handle/id.");
             return;
         }
 
@@ -220,14 +220,14 @@ public sealed class FacebookFeedModule(
         var feeds = await query.ToListAsync();
         if (feeds.Count == 0)
         {
-            await ReplyAsync($"No tracked mapping found for Facebook source {sourceKey}.");
+            await ReplyAsync($"No tracked mapping found for Facebook fanpage {sourceKey}.");
             return;
         }
 
         _db.TrackedFeeds.RemoveRange(feeds);
         await _db.SaveChangesAsync();
 
-        await ReplyAsync($"Removed {feeds.Count} mapping(s) for Facebook source {sourceKey}.");
+        await ReplyAsync($"Removed {feeds.Count} mapping(s) for Facebook fanpage {sourceKey}.");
     }
 
     private static FeedProvider? ParseProvider(string? value)
@@ -378,7 +378,7 @@ public sealed class FacebookFeedModule(
                payload.Contains("Not Found", StringComparison.OrdinalIgnoreCase);
     }
 
-    private static string NormalizeFacebookSource(string input)
+    private static string NormalizeFanpageSource(string input)
     {
         if (string.IsNullOrWhiteSpace(input))
         {
