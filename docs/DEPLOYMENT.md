@@ -88,7 +88,13 @@ dotnet run --project src/DiscordXBot/DiscordXBot.csproj
 After deployment:
 
 ```powershell
-.\scripts\smoke-test.ps1 -Profile prod
+.\scripts\smoke-test.ps1 -ComposeMode prod
+```
+
+If the bot was restarted earlier than the default log window, increase it:
+
+```powershell
+.\scripts\smoke-test.ps1 -ComposeMode prod -BotLogSinceMinutes 240
 ```
 
 Manual checks:
@@ -96,6 +102,11 @@ Manual checks:
 - /add-x persists feed mapping
 - /add-fb and /add-link persist feed mapping
 - New tweet is published once only
+
+The smoke script now verifies:
+- `tracked_feeds` includes `Platform`, `Provider`, `SourceKey`
+- Active feed summary grouped by `Platform` and `Provider`
+- Slash command registration summary contains: `add-x/list-x/remove-x`, `add-fb/list-fb/remove-fb`, `add-link/list-links/remove-link`
 
 ## Logs and Diagnostics
 

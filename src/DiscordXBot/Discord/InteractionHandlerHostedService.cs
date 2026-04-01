@@ -1,4 +1,5 @@
 using System.Reflection;
+using System.Linq;
 using DiscordXBot.Configuration;
 using Discord.Interactions;
 using Discord.WebSocket;
@@ -58,12 +59,34 @@ public sealed class InteractionHandlerHostedService(
                 _logger.LogInformation("Registered slash commands globally.");
             }
 
+            LogRegisteredCommandSet();
+
             _isRegistered = true;
         }
         finally
         {
             _registrationLock.Release();
         }
+    }
+
+    private void LogRegisteredCommandSet()
+    {
+        var slashCommands = _interactionService.SlashCommands
+            .Select(x => x.Name)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(x => x)
+            .ToArray();
+
+        if (slashCommands.Length == 0)
+        {
+            _logger.LogWarning("No slash commands discovered by InteractionService after registration.");
+            return;
+        }
+
+        _logger.LogInformation(
+            "Registered slash command set ({Count}): {CommandNames}",
+            slashCommands.Length,
+            string.Join(", ", slashCommands));
     }
 
     private async Task OnInteractionCreatedAsync(SocketInteraction interaction)

@@ -19,6 +19,7 @@
 - Validate Discord rate-limit incidents are below threshold
 - Run preflight script before each release
 - Run smoke test script after each release
+- Confirm smoke test output contains slash command registration summary for `add-x`, `add-fb`, and `add-link` command families
 
 ## Deployment Artifacts
 - Confirm [docs/ENV-MATRIX.md](docs/ENV-MATRIX.md) is up to date with current config shape
