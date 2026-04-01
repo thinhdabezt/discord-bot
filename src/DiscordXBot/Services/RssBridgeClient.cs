@@ -80,6 +80,14 @@ public sealed class RssBridgeClient(
             }
         }
 
+        if (posts.Count == 0 && skippedErrorItems > 0)
+        {
+            _logger.LogWarning(
+                "Feed source {SourceKey} returned only bridge error item(s). Check source visibility/public posts. Url={RssUrl}",
+                trackedFeed.SourceKey,
+                rssUrl);
+        }
+
         _logger.LogDebug("Fetched {Count} post(s) from {RssUrl}", posts.Count, rssUrl);
         return posts;
     }
