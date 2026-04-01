@@ -34,7 +34,11 @@ public sealed class FeedUrlResolver(
         };
     }
 
-    public string Resolve(FeedPlatform platform, FeedProvider provider, string source)
+    public string Resolve(
+        FeedPlatform platform,
+        FeedProvider provider,
+        string source,
+        FacebookSourceType facebookSourceType = FacebookSourceType.Fanpage)
     {
         if (string.IsNullOrWhiteSpace(source))
         {
@@ -45,21 +49,23 @@ public sealed class FeedUrlResolver(
 
         return provider switch
         {
-            FeedProvider.RssBridge => ResolveRssBridge(platform, value),
+            FeedProvider.RssBridge => ResolveRssBridge(platform, value, facebookSourceType),
             FeedProvider.DirectRss => ResolveDirectRss(value),
-            FeedProvider.RssHub => ResolveRssHub(platform, value),
+            FeedProvider.RssHub => ResolveRssHub(platform, value, facebookSourceType),
             _ => throw new NotSupportedException($"Unsupported provider: {provider}")
         };
     }
 
-    private string ResolveRssBridge(FeedPlatform platform, string source)
+    private string ResolveRssBridge(FeedPlatform platform, string source, FacebookSourceType facebookSourceType)
     {
         var baseUrl = _rssBridgeOptions.CurrentValue.BaseUrl.TrimEnd('/');
 
         return platform switch
         {
             FeedPlatform.X => $"{baseUrl}/?action=display&bridge=TwitterBridge&context=By+username&u={Uri.EscapeDataString(source)}&format=Atom",
-            FeedPlatform.Facebook => $"{baseUrl}/?action=display&bridge=FacebookBridge&context=User&u={Uri.EscapeDataString(source)}&media_type=all&format=Atom",
+            FeedPlatform.Facebook when facebookSourceType == FacebookSourceType.Fanpage =>
+                $"{baseUrl}/?action=display&bridge=FacebookBridge&context=User&u={Uri.EscapeDataString(source)}&media_type=all&format=Atom",
+            FeedPlatform.Facebook => throw new NotSupportedException("Facebook profile is not supported by RSS-Bridge provider."),
             _ => throw new NotSupportedException($"Unsupported platform: {platform}")
         };
     }
@@ -80,12 +86,12 @@ public sealed class FeedUrlResolver(
         return uri.ToString();
     }
 
-    private string ResolveRssHub(FeedPlatform platform, string source)
+    private string ResolveRssHub(FeedPlatform platform, string source, FacebookSourceType facebookSourceType)
     {
         return platform switch
         {
             FeedPlatform.X => ResolveXViaRssHub(source),
-            FeedPlatform.Facebook => ResolveFacebookViaRssHub(source, FacebookSourceType.Fanpage),
+            FeedPlatform.Facebook => ResolveFacebookViaRssHub(source, facebookSourceType),
             _ => throw new NotSupportedException($"Unsupported platform: {platform}")
         };
     }
@@ -103,7 +109,7 @@ public sealed class FeedUrlResolver(
         return sourceType switch
         {
             FacebookSourceType.Fanpage => $"{baseUrl}/facebook/page/{Uri.EscapeDataString(source)}",
-            FacebookSourceType.Profile => throw new NotSupportedException("Facebook profile route is reserved for a future phase."),
+            FacebookSourceType.Profile => $"{baseUrl}/facebook/user/{Uri.EscapeDataString(source)}",
             _ => throw new NotSupportedException($"Unsupported Facebook source type: {sourceType}")
         };
     }

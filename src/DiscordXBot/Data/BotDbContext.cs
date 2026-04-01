@@ -26,6 +26,9 @@ public sealed class BotDbContext(DbContextOptions<BotDbContext> options) : DbCon
             entity.Property(x => x.Platform)
                 .HasConversion<int>();
 
+            entity.Property(x => x.SourceType)
+                .HasConversion<int>();
+
             entity.Property(x => x.Provider)
                 .HasConversion<int>();
 

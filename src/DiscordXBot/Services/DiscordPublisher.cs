@@ -199,8 +199,9 @@ public sealed class DiscordPublisher(
     {
         if (feed.Platform == FeedPlatform.Facebook)
         {
-            var fanpage = string.IsNullOrWhiteSpace(feed.SourceKey) ? "unknown" : feed.SourceKey;
-            return $"FB Fanpage: {fanpage}";
+            var source = string.IsNullOrWhiteSpace(feed.SourceKey) ? "unknown" : feed.SourceKey;
+            var label = feed.SourceType == FacebookSourceType.Profile ? "Profile" : "Fanpage";
+            return $"FB {label}: {source}";
         }
 
         var username = string.IsNullOrWhiteSpace(feed.SourceKey) ? feed.XUsername : feed.SourceKey;

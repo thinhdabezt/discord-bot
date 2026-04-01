@@ -8,6 +8,7 @@ public sealed class TrackedFeed
     public string XUsername { get; set; } = string.Empty;
     public string SourceKey { get; set; } = string.Empty;
     public FeedPlatform Platform { get; set; } = FeedPlatform.X;
+    public FacebookSourceType SourceType { get; set; } = FacebookSourceType.Fanpage;
     public FeedProvider Provider { get; set; } = FeedProvider.RssBridge;
     public string RssUrl { get; set; } = string.Empty;
     public bool IsActive { get; set; } = true;

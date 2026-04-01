@@ -249,6 +249,28 @@ $checkBridgeCount = ($results | Where-Object { $_.Recommendation -eq 'check-rss-
 
 Write-Host "Summary: use-add-fb=$usableCount, prefer-add-link=$preferLinkCount, retry-later=$retryCount, invalid-source=$invalidCount, check-rss-bridge=$checkBridgeCount" -ForegroundColor Cyan
 
+$useAddFbGroup = $results | Where-Object { $_.Recommendation -eq 'use-add-fb' } | Sort-Object SourceKey
+$preferAddLinkGroup = $results | Where-Object { $_.Recommendation -eq 'prefer-add-link' } | Sort-Object SourceKey
+
+if ($useAddFbGroup.Count -gt 0 -or $preferAddLinkGroup.Count -gt 0) {
+    Write-Host "" 
+    Write-Host "Suggested command plan by source:" -ForegroundColor Cyan
+}
+
+if ($useAddFbGroup.Count -gt 0) {
+    Write-Host "[Group: use-add-fb]" -ForegroundColor Green
+    foreach ($item in $useAddFbGroup) {
+        Write-Host "/add-fb fanpage_or_id:$($item.SourceKey) channel:<target-channel> provider:rssbridge source_type:fanpage"
+    }
+}
+
+if ($preferAddLinkGroup.Count -gt 0) {
+    Write-Host "[Group: prefer-add-link]" -ForegroundColor Yellow
+    foreach ($item in $preferAddLinkGroup) {
+        Write-Host "/add-link rss_url:<direct-rss-url-for-$($item.SourceKey)> platform:FB channel:<target-channel>"
+    }
+}
+
 if ($FailOnUnusable) {
     $unusableCount = ($results | Where-Object { $_.Recommendation -ne 'use-add-fb' }).Count
     if ($unusableCount -gt 0) {

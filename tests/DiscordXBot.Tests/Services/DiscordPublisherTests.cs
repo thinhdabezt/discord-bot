@@ -102,6 +102,31 @@ public class DiscordPublisherTests
     }
 
     [Fact]
+    public void BuildMessageText_FormatsFacebookProfileHeader()
+    {
+        var postedAtUtc = new DateTime(2026, 01, 02, 03, 04, 05, DateTimeKind.Utc);
+        var feed = new TrackedFeed
+        {
+            Platform = FeedPlatform.Facebook,
+            SourceType = FacebookSourceType.Profile,
+            SourceKey = "10001234567890"
+        };
+
+        var text = DiscordPublisher.BuildMessageText(
+            feed: feed,
+            caption: "Profile update",
+            postedAtUtc: postedAtUtc,
+            postUrl: "https://facebook.com/10001234567890/posts/1");
+
+        Assert.Equal(
+            "FB Profile: 10001234567890\n" +
+            "Caption: Profile update\n" +
+            "Posted: 2026-01-02 03:04:05 UTC\n" +
+            "Link: https://facebook.com/10001234567890/posts/1",
+            text);
+    }
+
+    [Fact]
     public void NormalizePostUrlForDisplay_ConvertsNitterStatusToXCom()
     {
         var normalized = DiscordPublisher.NormalizePostUrlForDisplay(

@@ -48,6 +48,37 @@ public class FeedUrlResolverTests
     }
 
     [Fact]
+    public void Resolve_UsesRssHubForFacebookProfile()
+    {
+        var resolver = CreateResolver(
+            new RssBridgeOptions(),
+            new FeedProviderOptions { RssHubBaseUrl = "http://rsshub:1200" });
+
+        var url = resolver.Resolve(
+            FeedPlatform.Facebook,
+            FeedProvider.RssHub,
+            "10001234567890",
+            FacebookSourceType.Profile);
+
+        Assert.Equal("http://rsshub:1200/facebook/user/10001234567890", url);
+    }
+
+    [Fact]
+    public void Resolve_ThrowsForFacebookProfileViaRssBridge()
+    {
+        var resolver = CreateResolver(
+            new RssBridgeOptions { BaseUrl = "http://rss-bridge:80" },
+            new FeedProviderOptions());
+
+        Assert.Throws<NotSupportedException>(() =>
+            resolver.Resolve(
+                FeedPlatform.Facebook,
+                FeedProvider.RssBridge,
+                "10001234567890",
+                FacebookSourceType.Profile));
+    }
+
+    [Fact]
     public void Resolve_ThrowsForDirectRssWithoutAbsoluteUrl()
     {
         var resolver = CreateResolver(new RssBridgeOptions(), new FeedProviderOptions());

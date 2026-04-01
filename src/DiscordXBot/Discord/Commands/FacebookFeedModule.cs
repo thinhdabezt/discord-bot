@@ -29,8 +29,12 @@ public sealed class FacebookFeedModule(
     private readonly FeedUrlResolver _feedUrlResolver = feedUrlResolver;
     private readonly ILogger<FacebookFeedModule> _logger = logger;
 
-    [SlashCommand("add-fb", "Add a Facebook fanpage feed to a Discord channel")]
-    public async Task AddFacebookAsync(string fanpageOrId, ITextChannel channel, string? provider = null)
+    [SlashCommand("add-fb", "Add a Facebook feed (fanpage/profile) to a Discord channel")]
+    public async Task AddFacebookAsync(
+        string fanpageOrId,
+        ITextChannel channel,
+        string? provider = null,
+        string sourceType = "fanpage")
     {
         if (!TryValidateGuildContext(out var guildUser))
         {
@@ -59,14 +63,33 @@ public sealed class FacebookFeedModule(
         var sourceKey = NormalizeFanpageSource(fanpageOrId);
         if (string.IsNullOrWhiteSpace(sourceKey))
         {
-            await ReplyAsync("Invalid Facebook fanpage handle/id.");
+            await ReplyAsync("Invalid Facebook source handle/id.");
             return;
         }
 
+        if (!TryParseSourceType(sourceType, out var selectedSourceType))
+        {
+            await ReplyAsync("Unsupported source type. Use: fanpage or profile.");
+            return;
+        }
+
+        if (selectedSourceType == FacebookSourceType.Profile && !IsNumericProfileSource(sourceKey))
+        {
+            await ReplyAsync("Profile source type currently requires a numeric Facebook ID.");
+            return;
+        }
+
+        var sourceTypeLabel = GetSourceTypeLabel(selectedSourceType);
         var selectedProvider = ParseProvider(provider) ?? _feedProviderOptions.CurrentValue.DefaultFacebookProvider;
         if (selectedProvider == FeedProvider.DirectRss)
         {
             await ReplyAsync("/add-fb supports RSSHub or RSS-Bridge fanpage feeds. Use /add-link for direct FetchRSS URLs.");
+            return;
+        }
+
+        if (selectedSourceType == FacebookSourceType.Profile && selectedProvider != FeedProvider.RssHub)
+        {
+            await ReplyAsync("Facebook profile feeds currently support RSSHub only. Use provider=rsshub or use /add-link for a direct RSS URL.");
             return;
         }
 
@@ -81,18 +104,28 @@ public sealed class FacebookFeedModule(
         string rssUrl;
         try
         {
-            rssUrl = _feedUrlResolver.Resolve(FeedPlatform.Facebook, selectedProvider, sourceKey);
+            rssUrl = _feedUrlResolver.Resolve(FeedPlatform.Facebook, selectedProvider, sourceKey, selectedSourceType);
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to resolve Facebook fanpage RSS URL for source {SourceKey}", sourceKey);
+            _logger.LogWarning(
+                ex,
+                "Failed to resolve Facebook {SourceType} RSS URL for source {SourceKey}",
+                sourceTypeLabel,
+                sourceKey);
             await ReplyAsync("Unable to construct RSS URL from current provider settings.");
             return;
         }
 
-        if (!await ValidateRssAsync(rssUrl, selectedProvider))
+        var validation = await ValidateRssAsync(rssUrl, selectedProvider);
+        if (!validation.IsValid)
         {
-            await ReplyAsync($"Unable to validate fanpage feed for {sourceKey}.");
+            var suggestion = validation.PreferAddLink
+                ? $"Command plan for {sourceKey}: prefer /add-link with platform FB and a direct RSS URL to channel {channel.Mention}."
+                : "Command plan: retry /add-fb later for this source.";
+
+            await ReplyAsync(
+                $"Unable to validate Facebook {sourceTypeLabel} feed for {sourceKey}. {validation.Reason} {suggestion}");
             return;
         }
 
@@ -118,6 +151,7 @@ public sealed class FacebookFeedModule(
             XUsername = BuildLegacyUsername(sourceKey, FeedPlatform.Facebook),
             SourceKey = sourceKey,
             Platform = FeedPlatform.Facebook,
+            SourceType = selectedSourceType,
             Provider = selectedProvider,
             RssUrl = rssUrl,
             IsActive = true,
@@ -136,7 +170,7 @@ public sealed class FacebookFeedModule(
             return;
         }
 
-        await ReplyAsync($"Added Facebook fanpage {sourceKey} to {channel.Mention} via {selectedProvider}.");
+        await ReplyAsync($"Added Facebook {sourceTypeLabel} {sourceKey} to {channel.Mention} via {selectedProvider}.");
     }
 
     [SlashCommand("list-fb", "List tracked Facebook fanpage feeds in this guild")]
@@ -165,7 +199,7 @@ public sealed class FacebookFeedModule(
         }
 
         var lines = feeds
-            .Select(x => $"- {x.SourceKey} -> <#{x.ChannelId}> ({x.Provider})")
+            .Select(x => $"- [{GetSourceTypeLabel(x.SourceType)}] {x.SourceKey} -> <#{x.ChannelId}> ({x.Provider})")
             .Take(25)
             .ToList();
 
@@ -175,7 +209,7 @@ public sealed class FacebookFeedModule(
         }
 
         var embed = new EmbedBuilder()
-            .WithTitle("Tracked Facebook Fanpages")
+            .WithTitle("Tracked Facebook Sources")
             .WithColor(new Color(66, 103, 178))
             .WithDescription(string.Join("\n", lines))
             .WithCurrentTimestamp()
@@ -228,14 +262,14 @@ public sealed class FacebookFeedModule(
         var feeds = await query.ToListAsync();
         if (feeds.Count == 0)
         {
-            await ReplyAsync($"No tracked mapping found for Facebook fanpage {sourceKey}.");
+            await ReplyAsync($"No tracked mapping found for Facebook source {sourceKey}.");
             return;
         }
 
         _db.TrackedFeeds.RemoveRange(feeds);
         await _db.SaveChangesAsync();
 
-        await ReplyAsync($"Removed {feeds.Count} mapping(s) for Facebook fanpage {sourceKey}.");
+        await ReplyAsync($"Removed {feeds.Count} mapping(s) for Facebook source {sourceKey}.");
     }
 
     private static FeedProvider? ParseProvider(string? value)
@@ -256,7 +290,7 @@ public sealed class FacebookFeedModule(
         };
     }
 
-    private async Task<bool> ValidateRssAsync(string rssUrl, FeedProvider provider)
+    private async Task<FeedValidationResult> ValidateRssAsync(string rssUrl, FeedProvider provider)
     {
         var maxRetries = Math.Max(0, _retryOptions.Value.MaxRetries);
         var initialDelaySeconds = Math.Max(1, _retryOptions.Value.InitialDelaySeconds);
@@ -271,20 +305,27 @@ public sealed class FacebookFeedModule(
 
                 if (response.IsSuccessStatusCode)
                 {
-                    if (provider == FeedProvider.RssBridge)
+                    var body = await response.Content.ReadAsStringAsync(cts.Token);
+                    if (string.IsNullOrWhiteSpace(body))
                     {
-                        // RSS-Bridge may return mixed entries (error + usable entries) for Facebook pages.
-                        // For command-level validation, a successful response is sufficient.
-                        return true;
+                        return FeedValidationResult.Invalid("Feed response is empty.", preferAddLink: false);
                     }
 
-                    var body = await response.Content.ReadAsStringAsync(cts.Token);
                     if (LooksLikeErrorPayload(body))
                     {
-                        return false;
+                        return FeedValidationResult.Invalid(
+                            "Feed response contains parser error markers.",
+                            preferAddLink: true);
                     }
 
-                    return true;
+                    if (provider == FeedProvider.RssBridge && !HasUsableFeedItems(body))
+                    {
+                        return FeedValidationResult.Invalid(
+                            "RSS-Bridge response has no usable items for this source.",
+                            preferAddLink: true);
+                    }
+
+                    return FeedValidationResult.Valid();
                 }
 
                 if ((int)response.StatusCode >= 500 && attempt < maxRetries)
@@ -294,7 +335,9 @@ public sealed class FacebookFeedModule(
                     continue;
                 }
 
-                return false;
+                return FeedValidationResult.Invalid(
+                    $"Received HTTP {(int)response.StatusCode} from feed provider.",
+                    preferAddLink: false);
             }
             catch (OperationCanceledException) when (attempt < maxRetries)
             {
@@ -309,11 +352,11 @@ public sealed class FacebookFeedModule(
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "RSS validation failed for URL {RssUrl}", rssUrl);
-                return false;
+                return FeedValidationResult.Invalid("Feed validation failed due to an unexpected error.", preferAddLink: false);
             }
         }
 
-        return false;
+        return FeedValidationResult.Invalid("Feed validation retries exhausted.", preferAddLink: false);
     }
 
     private async Task ReplyAsync(string message, Embed? embed = null, bool ephemeral = true)
@@ -378,6 +421,54 @@ public sealed class FacebookFeedModule(
     private static bool IsUniqueViolation(DbUpdateException ex)
     {
         return ex.InnerException is PostgresException { SqlState: "23505" };
+    }
+
+    private static bool TryParseSourceType(string value, out FacebookSourceType sourceType)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            sourceType = FacebookSourceType.Fanpage;
+            return true;
+        }
+
+        switch (value.Trim().ToLowerInvariant())
+        {
+            case "fanpage":
+            case "page":
+                sourceType = FacebookSourceType.Fanpage;
+                return true;
+            case "profile":
+            case "personal":
+            case "personalprofile":
+                sourceType = FacebookSourceType.Profile;
+                return true;
+            default:
+                sourceType = FacebookSourceType.Fanpage;
+                return false;
+        }
+    }
+
+    private static bool IsNumericProfileSource(string sourceKey)
+    {
+        return sourceKey.All(char.IsDigit);
+    }
+
+    private static string GetSourceTypeLabel(FacebookSourceType sourceType)
+    {
+        return sourceType == FacebookSourceType.Profile ? "profile" : "fanpage";
+    }
+
+    private sealed record FeedValidationResult(bool IsValid, string Reason, bool PreferAddLink)
+    {
+        public static FeedValidationResult Valid()
+        {
+            return new FeedValidationResult(true, string.Empty, false);
+        }
+
+        public static FeedValidationResult Invalid(string reason, bool preferAddLink)
+        {
+            return new FeedValidationResult(false, reason, preferAddLink);
+        }
     }
 
     private static bool LooksLikeErrorPayload(string payload)
