@@ -122,6 +122,26 @@ This script checks:
 - `processed_tweets` contains publish evidence for the configured lookback window
 - bot logs include publish activity pattern
 
+## Facebook Source Pre-check (Batch)
+Before running `/add-fb` on many fanpages, pre-check source health against RSS-Bridge:
+
+```powershell
+.\scripts\precheck-fanpages.ps1 -FanpageSources 10150123547145211,100071458686024
+```
+
+You can also read IDs from a file (one source per line, lines starting with `#` are ignored):
+
+```powershell
+.\scripts\precheck-fanpages.ps1 -FanpageSourcesFile .\fanpages.txt
+```
+
+Recommendation meanings:
+- `use-add-fb`: feed has usable entries and is suitable for `/add-fb`
+- `prefer-add-link`: feed is reachable but only contains bridge error entries; prefer direct RSS via `/add-link`
+- `retry-later`: feed has no entries at this moment; retry later before deciding
+- `check-rss-bridge`: request failed; verify `rss-bridge` container and URL
+- `invalid-source`: source cannot be normalized (bad ID/URL format)
+
 ## Logs and Diagnostics
 
 ```powershell
