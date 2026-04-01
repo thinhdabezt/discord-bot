@@ -50,6 +50,12 @@ public sealed class FacebookFeedModule(
             return;
         }
 
+        if (string.IsNullOrWhiteSpace(provider) && ParseProvider(fanpageOrId) is not null)
+        {
+            await ReplyAsync("It looks like you entered provider value in the fanpage/id field. Put your fanpage handle or page ID in fanpage/id, and set provider separately (for example: rssbridge).", ephemeral: true);
+            return;
+        }
+
         var sourceKey = NormalizeFanpageSource(fanpageOrId);
         if (string.IsNullOrWhiteSpace(sourceKey))
         {
