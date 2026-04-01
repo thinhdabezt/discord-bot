@@ -1,6 +1,8 @@
 param(
     [string]$ComposeMode = "prod",
     [string]$FanpageSource,
+    [ValidateSet("fanpage", "profile")]
+    [string]$FacebookSourceType = "fanpage",
     [string]$DirectRssUrl,
     [int]$LookbackMinutes = 120,
     [switch]$SkipLogScan
@@ -130,26 +132,29 @@ if ($failed -eq 0 -and [string]::IsNullOrWhiteSpace($FanpageSource) -and [string
 
 if ($failed -eq 0 -and -not [string]::IsNullOrWhiteSpace($FanpageSource)) {
     $normalizedFanpage = ConvertTo-FanpageSourceKey -InputValue $FanpageSource
+    $sourceTypeValue = if ($FacebookSourceType -eq "profile") { 1 } else { 0 }
+    $sourceTypeLabel = if ($FacebookSourceType -eq "profile") { "profile" } else { "fanpage" }
+
     if ([string]::IsNullOrWhiteSpace($normalizedFanpage)) {
-        Fail "Fanpage source normalization failed. Check -FanpageSource input."
+        Fail "Facebook source normalization failed. Check -FanpageSource input."
     }
     else {
         $fanpageSqlValue = ConvertTo-SqlLiteral $normalizedFanpage
-        $fanpageSql = "SELECT COUNT(*) FROM tracked_feeds t WHERE (to_jsonb(t)->>'Platform')::int = 1 AND (to_jsonb(t)->>'Provider')::int IN (0,2) AND lower(to_jsonb(t)->>'SourceKey') = lower('$fanpageSqlValue');"
+        $fanpageSql = "SELECT COUNT(*) FROM tracked_feeds t WHERE (to_jsonb(t)->>'Platform')::int = 1 AND (to_jsonb(t)->>'SourceType')::int = $sourceTypeValue AND (to_jsonb(t)->>'Provider')::int IN (0,2) AND lower(to_jsonb(t)->>'SourceKey') = lower('$fanpageSqlValue');"
         $fanpageCountText = Invoke-DbSql -User $postgresUser -Database $postgresDb -Sql $fanpageSql
         $fanpageText = ($fanpageCountText | Out-String)
 
         if ($LASTEXITCODE -ne 0 -or $fanpageText -match 'ERROR:') {
-            Fail "Failed querying tracked fanpage mapping."
+            Fail "Failed querying tracked Facebook source mapping."
         }
         else {
             $fanpageCount = 0
             [void][int]::TryParse($fanpageText.Trim(), [ref]$fanpageCount)
             if ($fanpageCount -gt 0) {
-                Pass "Fanpage mapping exists for '$normalizedFanpage' (count=$fanpageCount)."
+                Pass "Facebook $sourceTypeLabel mapping exists for '$normalizedFanpage' (count=$fanpageCount)."
             }
             else {
-                Fail "No tracked fanpage mapping found for '$normalizedFanpage'. Run /add-fb first."
+                Fail "No tracked Facebook $sourceTypeLabel mapping found for '$normalizedFanpage'. Run /add-fb first."
             }
         }
     }

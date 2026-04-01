@@ -9,7 +9,7 @@
 ## Database
 - Verify latest EF migration has been applied
 - Create backup before applying new migration (`scripts/apply-migrations.ps1` does this by default)
-- Verify `tracked_feeds` schema contains `Platform`, `Provider`, and `SourceKey`
+- Verify `tracked_feeds` schema contains `Platform`, `SourceType`, `Provider`, and `SourceKey`
 - Confirm dedupe table growth is monitored
 - Set retention strategy for old `processed_tweets` rows
 
@@ -22,6 +22,8 @@
 - Confirm smoke test output contains slash command registration summary for `add-x`, `add-fb`, and `add-link` command families
 - Run `scripts/precheck-fanpages.ps1` for batch Facebook onboarding, and only use `/add-fb` for sources marked `use-add-fb`
 - Run `scripts/integration-evidence.ps1` after real `/add-fb` and `/add-link` setup to verify DB + publish evidence
+- For profile sources, verify `/add-fb` uses numeric ID with `sourceType=profile` and evidence script uses `-FacebookSourceType profile`
+- If profile alerts are enabled, verify `FEEDPROVIDERS__FACEBOOKPROFILEALERTCHANNELID` points to an admin-only channel
 
 ## Deployment Artifacts
 - Confirm [docs/ENV-MATRIX.md](docs/ENV-MATRIX.md) is up to date with current config shape
@@ -31,6 +33,7 @@
 ## Monitoring
 - Track publish success/failure ratio daily
 - Alert on sustained fetch failures per username
+- Alert on repeated Facebook profile fetch issues (403/error-only/empty after prior success) and rotate FB cookie when triggered
 - Alert when bot disconnects from gateway repeatedly
 
 ## Recovery

@@ -94,7 +94,7 @@ catch {
 }
 
 try {
-    $schemaSql = "SELECT COUNT(*) FROM information_schema.columns WHERE table_name='tracked_feeds' AND column_name IN ('Platform', 'Provider', 'SourceKey');"
+    $schemaSql = "SELECT COUNT(*) FROM information_schema.columns WHERE table_name='tracked_feeds' AND column_name IN ('Platform', 'Provider', 'SourceKey', 'SourceType');"
     $schemaCountText = docker compose exec -T db psql -U $postgresUser -d $postgresDb -t -A -c $schemaSql 2>&1
     if ($LASTEXITCODE -ne 0 -or (($schemaCountText | Out-String) -match "ERROR:")) {
         Fail "Unable to verify tracked_feeds schema"
@@ -103,11 +103,11 @@ try {
     $schemaCount = 0
     [void][int]::TryParse(($schemaCountText | Out-String).Trim(), [ref]$schemaCount)
 
-    if ($schemaCount -eq 3) {
-        Pass "tracked_feeds schema includes Platform, Provider, SourceKey"
+    if ($schemaCount -eq 4) {
+        Pass "tracked_feeds schema includes Platform, SourceType, Provider, SourceKey"
     }
     else {
-        Fail "tracked_feeds schema check failed. Expected 3 tracked columns, got $schemaCount"
+        Fail "tracked_feeds schema check failed. Expected 4 tracked columns, got $schemaCount"
     }
 }
 catch {
@@ -115,7 +115,7 @@ catch {
 }
 
 try {
-    $summarySql = "SELECT to_jsonb(tracked_feeds)->>'Platform' AS platform, to_jsonb(tracked_feeds)->>'Provider' AS provider, COUNT(*) FROM tracked_feeds WHERE (to_jsonb(tracked_feeds)->>'IsActive')::boolean = true GROUP BY 1,2 ORDER BY 1,2;"
+    $summarySql = "SELECT to_jsonb(tracked_feeds)->>'Platform' AS platform, to_jsonb(tracked_feeds)->>'SourceType' AS source_type, to_jsonb(tracked_feeds)->>'Provider' AS provider, COUNT(*) FROM tracked_feeds WHERE (to_jsonb(tracked_feeds)->>'IsActive')::boolean = true GROUP BY 1,2,3 ORDER BY 1,2,3;"
     $summary = docker compose exec -T db psql -U $postgresUser -d $postgresDb -c $summarySql 2>&1
     $summaryText = ($summary | Out-String)
     if ($LASTEXITCODE -ne 0 -or $summaryText -match "ERROR:") {
@@ -123,7 +123,7 @@ try {
     }
     else {
         $summary | Out-Host
-        Pass "Printed active feed summary by platform/provider"
+        Pass "Printed active feed summary by platform/sourceType/provider"
     }
 }
 catch {

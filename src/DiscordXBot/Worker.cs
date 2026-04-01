@@ -3,6 +3,7 @@ using DiscordXBot.Data;
 using DiscordXBot.Data.Entities;
 using DiscordXBot.Services;
 using DiscordXBot.Services.Models;
+using System.Collections.Concurrent;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Npgsql;
@@ -16,9 +17,11 @@ public class Worker : BackgroundService
     private readonly IOptionsMonitor<PollingOptions> _pollingOptions;
     private readonly IOptionsMonitor<RetryOptions> _retryOptions;
     private readonly IOptionsMonitor<PublishOptions> _publishOptions;
+    private readonly IOptionsMonitor<FeedProviderOptions> _feedProviderOptions;
     private readonly RssBridgeClient _rssBridgeClient;
     private readonly TweetContentParser _tweetContentParser;
     private readonly DiscordPublisher _discordPublisher;
+    private readonly ConcurrentDictionary<string, ProfileFetchHealthState> _profileFetchHealth = new(StringComparer.OrdinalIgnoreCase);
 
     public Worker(
         ILogger<Worker> logger,
@@ -26,6 +29,7 @@ public class Worker : BackgroundService
         IOptionsMonitor<PollingOptions> pollingOptions,
         IOptionsMonitor<RetryOptions> retryOptions,
         IOptionsMonitor<PublishOptions> publishOptions,
+        IOptionsMonitor<FeedProviderOptions> feedProviderOptions,
         RssBridgeClient rssBridgeClient,
         TweetContentParser tweetContentParser,
         DiscordPublisher discordPublisher)
@@ -35,6 +39,7 @@ public class Worker : BackgroundService
         _pollingOptions = pollingOptions;
         _retryOptions = retryOptions;
         _publishOptions = publishOptions;
+        _feedProviderOptions = feedProviderOptions;
         _rssBridgeClient = rssBridgeClient;
         _tweetContentParser = tweetContentParser;
         _discordPublisher = discordPublisher;
@@ -84,6 +89,7 @@ public class Worker : BackgroundService
             .GroupBy(x => new
             {
                 x.Platform,
+                x.SourceType,
                 SourceKey = GetSourceKey(x)
             })
             .ToList();
@@ -95,13 +101,19 @@ public class Worker : BackgroundService
         {
             var sampleFeed = group.First();
             var feedLabel = GetFeedLabel(sampleFeed);
-            IReadOnlyList<RssPost> posts;
+            FeedFetchResult fetchResult;
 
             try
             {
-                posts = await FetchPostsWithRetryAsync(
+                fetchResult = await FetchPostsWithRetryAsync(
                     sampleFeed,
                     _pollingOptions.CurrentValue.MaxItemsPerFeed,
+                    cancellationToken);
+
+                await EvaluateProfileHealthAsync(
+                    db,
+                    sampleFeed,
+                    fetchResult,
                     cancellationToken);
             }
             catch (Exception ex)
@@ -109,6 +121,8 @@ public class Worker : BackgroundService
                 _logger.LogWarning(ex, "Failed to fetch RSS for {FeedLabel}", feedLabel);
                 continue;
             }
+
+            var posts = fetchResult.Posts;
 
             if (posts.Count == 0)
             {
@@ -220,7 +234,7 @@ public class Worker : BackgroundService
             totalRetries);
     }
 
-    private async Task<IReadOnlyList<RssPost>> FetchPostsWithRetryAsync(
+    private async Task<FeedFetchResult> FetchPostsWithRetryAsync(
         TrackedFeed trackedFeed,
         int maxItems,
         CancellationToken cancellationToken)
@@ -230,18 +244,170 @@ public class Worker : BackgroundService
 
         for (var attempt = 0; attempt <= maxRetries; attempt++)
         {
-            try
+            var result = await _rssBridgeClient.GetPostsDetailedAsync(trackedFeed, maxItems, cancellationToken);
+            if (!IsRetriableFetchOutcome(result) || attempt >= maxRetries)
             {
-                return await _rssBridgeClient.GetPostsAsync(trackedFeed, maxItems, cancellationToken);
+                return result;
             }
-            catch when (attempt < maxRetries)
-            {
-                var delay = TimeSpan.FromSeconds(initialDelaySeconds * Math.Pow(2, attempt));
-                await Task.Delay(delay, cancellationToken);
-            }
+
+            var delay = TimeSpan.FromSeconds(initialDelaySeconds * Math.Pow(2, attempt));
+            await Task.Delay(delay, cancellationToken);
         }
 
-        return [];
+        return FeedFetchResult.NetworkError("Fetch retry budget exhausted.");
+    }
+
+    private async Task EvaluateProfileHealthAsync(
+        BotDbContext db,
+        TrackedFeed sampleFeed,
+        FeedFetchResult fetchResult,
+        CancellationToken cancellationToken)
+    {
+        if (sampleFeed.Platform != FeedPlatform.Facebook || sampleFeed.SourceType != FacebookSourceType.Profile)
+        {
+            return;
+        }
+
+        var stateKey = GetProfileStateKey(sampleFeed);
+        var state = _profileFetchHealth.GetOrAdd(stateKey, _ => new ProfileFetchHealthState());
+
+        if (fetchResult.Outcome == FeedFetchOutcome.Success && fetchResult.Posts.Count > 0)
+        {
+            state.ConsecutiveFailures = 0;
+            state.HasHistoricalSuccess = true;
+            return;
+        }
+
+        var shouldCountFailure = await ShouldCountProfileFailureAsync(
+            db,
+            sampleFeed,
+            fetchResult,
+            state,
+            cancellationToken);
+
+        if (!shouldCountFailure)
+        {
+            state.ConsecutiveFailures = 0;
+            return;
+        }
+
+        state.ConsecutiveFailures++;
+        var outcomeLabel = GetFetchOutcomeLabel(fetchResult.Outcome);
+
+        _logger.LogWarning(
+            "Profile feed issue detected for {FeedLabel}. ConsecutiveIssues={ConsecutiveIssues}, Outcome={Outcome}, StatusCode={StatusCode}",
+            GetFeedLabel(sampleFeed),
+            state.ConsecutiveFailures,
+            outcomeLabel,
+            fetchResult.StatusCode);
+
+        var options = _feedProviderOptions.CurrentValue;
+        if (!options.EnableFacebookProfileAlerts || options.FacebookProfileAlertChannelId == 0)
+        {
+            return;
+        }
+
+        var failureThreshold = Math.Max(1, options.FacebookProfileFailureThreshold);
+        if (state.ConsecutiveFailures < failureThreshold)
+        {
+            return;
+        }
+
+        var cooldownMinutes = Math.Max(5, options.FacebookProfileAlertCooldownMinutes);
+        var utcNow = DateTime.UtcNow;
+        if (state.LastAlertAtUtc != default &&
+            utcNow - state.LastAlertAtUtc < TimeSpan.FromMinutes(cooldownMinutes))
+        {
+            return;
+        }
+
+        var alertMessage =
+            $"[FB Profile Alert] Source={sampleFeed.SourceKey} has {state.ConsecutiveFailures} consecutive fetch issues ({outcomeLabel}). " +
+            "Cookie may be expired or profile visibility changed. Check RSSHub FB_COOKIE and profile route /facebook/user/{id}.";
+
+        var alertResult = await _discordPublisher.PublishSystemAlertAsync(
+            options.FacebookProfileAlertChannelId,
+            alertMessage,
+            cancellationToken);
+
+        if (alertResult.Success)
+        {
+            state.LastAlertAtUtc = utcNow;
+            _logger.LogInformation(
+                "Sent FB profile health alert for source {SourceKey} to channel {ChannelId}",
+                sampleFeed.SourceKey,
+                options.FacebookProfileAlertChannelId);
+            return;
+        }
+
+        _logger.LogWarning(
+            "Failed to send FB profile health alert for source {SourceKey}: {Failure}",
+            sampleFeed.SourceKey,
+            alertResult.ErrorMessage);
+    }
+
+    private async Task<bool> ShouldCountProfileFailureAsync(
+        BotDbContext db,
+        TrackedFeed sampleFeed,
+        FeedFetchResult fetchResult,
+        ProfileFetchHealthState state,
+        CancellationToken cancellationToken)
+    {
+        if (fetchResult.Outcome is FeedFetchOutcome.HttpForbidden or FeedFetchOutcome.ErrorOnly)
+        {
+            return true;
+        }
+
+        if (fetchResult.Outcome != FeedFetchOutcome.Empty)
+        {
+            return false;
+        }
+
+        if (state.HasHistoricalSuccess)
+        {
+            return true;
+        }
+
+        var hasHistoricalPublish = await db.ProcessedTweets
+            .AsNoTracking()
+            .AnyAsync(x => x.TrackedFeedId == sampleFeed.Id, cancellationToken);
+
+        if (hasHistoricalPublish)
+        {
+            state.HasHistoricalSuccess = true;
+        }
+
+        return hasHistoricalPublish;
+    }
+
+    private static bool IsRetriableFetchOutcome(FeedFetchResult result)
+    {
+        if (result.Outcome == FeedFetchOutcome.NetworkError)
+        {
+            return true;
+        }
+
+        return result.Outcome == FeedFetchOutcome.HttpError && result.StatusCode is >= 500;
+    }
+
+    private static string GetFetchOutcomeLabel(FeedFetchOutcome outcome)
+    {
+        return outcome switch
+        {
+            FeedFetchOutcome.HttpForbidden => "HTTP 403",
+            FeedFetchOutcome.ErrorOnly => "error-only-feed",
+            FeedFetchOutcome.Empty => "empty-feed",
+            FeedFetchOutcome.HttpError => "http-error",
+            FeedFetchOutcome.NetworkError => "network-error",
+            FeedFetchOutcome.ParseError => "parse-error",
+            _ => "success"
+        };
+    }
+
+    private static string GetProfileStateKey(TrackedFeed feed)
+    {
+        var source = GetSourceKey(feed);
+        return $"{feed.Platform}:{feed.SourceType}:{source}";
     }
 
     private async Task<(PublishResult Result, int RetryCount)> PublishWithRetryAsync(
@@ -314,6 +480,18 @@ public class Worker : BackgroundService
     private static string GetFeedLabel(TrackedFeed feed)
     {
         var sourceKey = string.IsNullOrWhiteSpace(feed.SourceKey) ? feed.XUsername : feed.SourceKey;
+        if (feed.Platform == FeedPlatform.Facebook)
+        {
+            return $"{feed.Platform}:{feed.SourceType}:{sourceKey}";
+        }
+
         return $"{feed.Platform}:{sourceKey}";
+    }
+
+    private sealed class ProfileFetchHealthState
+    {
+        public int ConsecutiveFailures { get; set; }
+        public bool HasHistoricalSuccess { get; set; }
+        public DateTime LastAlertAtUtc { get; set; }
     }
 }

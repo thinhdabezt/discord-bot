@@ -24,6 +24,12 @@ This matrix documents which variables are required for each deployment mode.
 | FEEDPROVIDERS__RSSHUBBASEURL | Optional | Optional | http://rsshub:1200 | http://rsshub:1200 | RSSHub base URL used by resolver for X/FB feeds. |
 | FEEDPROVIDERS__DEFAULTXPROVIDER | Optional | Optional | RssBridge | RssBridge | Default provider for /add-x command. |
 | FEEDPROVIDERS__DEFAULTFACEBOOKPROVIDER | Optional | Optional | RssHub | RssHub | Default provider for /add-fb fanpage command path. |
+| FEEDPROVIDERS__ENABLEFACEBOOKPROFILEALERTS | Optional | Optional | false | true | Enables runtime admin alerts when FB profile feeds show repeated cookie/visibility failures. |
+| FEEDPROVIDERS__FACEBOOKPROFILEALERTCHANNELID | Optional | Optional | 0 | 123456789012345678 | Discord channel ID receiving profile health alerts. 0 disables channel delivery. |
+| FEEDPROVIDERS__FACEBOOKPROFILEFAILURETHRESHOLD | Optional | Optional | 3 | 3 | Number of consecutive profile fetch failures before alerting. |
+| FEEDPROVIDERS__FACEBOOKPROFILEALERTCOOLDOWNMINUTES | Optional | Optional | 180 | 180 | Minimum minutes between repeated alerts for the same profile source. |
+| FB_COOKIE | Optional | Optional | empty | c_user=...;xs=... | Cookie used by RSSHub for Facebook personal profile routes. Keep secret. |
+| FB_PAGES_LIMIT | Optional | Optional | 3 | 3 | RSSHub fetch page limit for Facebook routes to reduce aggressive crawling. |
 | POLLING__INTERVALMINUTES | Optional | Optional | 10 | 10 | Polling interval in minutes. |
 | POLLING__MAXITEMSPERFEED | Optional | Optional | 5 | 5 | Max feed items fetched each cycle. |
 | RETRY__MAXRETRIES | Optional | Optional | 3 | 3 | Retry count for RSS fetch path. |

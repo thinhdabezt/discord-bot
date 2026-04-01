@@ -25,13 +25,7 @@ public sealed class DiscordPublisher(
         CancellationToken cancellationToken)
     {
         var channelId = unchecked((ulong)feed.ChannelId);
-        var channel = _client.GetChannel(channelId) as IMessageChannel;
-
-        if (channel is null)
-        {
-            var requestOptions = new RequestOptions { CancelToken = cancellationToken };
-            channel = await _client.GetChannelAsync(channelId, requestOptions) as IMessageChannel;
-        }
+        var channel = await ResolveMessageChannelAsync(channelId, cancellationToken);
 
         if (channel is null)
         {
@@ -166,6 +160,68 @@ public sealed class DiscordPublisher(
                 feed.ChannelId);
             return PublishResult.Fail(PublishFailureKind.Fatal, ex.Message);
         }
+    }
+
+    public async Task<PublishResult> PublishSystemAlertAsync(
+        ulong channelId,
+        string message,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(message))
+        {
+            return PublishResult.Fail(PublishFailureKind.Fatal, "Alert message is empty.");
+        }
+
+        var channel = await ResolveMessageChannelAsync(channelId, cancellationToken);
+        if (channel is null)
+        {
+            _logger.LogWarning("Admin alert channel {ChannelId} not found.", channelId);
+            return PublishResult.Fail(PublishFailureKind.ChannelMissing, "Alert channel not found");
+        }
+
+        try
+        {
+            var requestOptions = new RequestOptions { CancelToken = cancellationToken };
+            await channel.SendMessageAsync(text: message.Trim(), options: requestOptions);
+            return PublishResult.Ok();
+        }
+        catch (HttpException ex) when ((int)ex.HttpCode == 429)
+        {
+            _logger.LogWarning(ex, "Rate limited while sending profile alert to channel {ChannelId}", channelId);
+            return PublishResult.Fail(PublishFailureKind.RateLimited, ex.Message);
+        }
+        catch (HttpException ex) when ((int)ex.HttpCode >= 500)
+        {
+            _logger.LogWarning(ex, "Discord transient error while sending profile alert to channel {ChannelId}", channelId);
+            return PublishResult.Fail(PublishFailureKind.Transient, ex.Message);
+        }
+        catch (HttpRequestException ex)
+        {
+            _logger.LogWarning(ex, "Network error while sending profile alert to channel {ChannelId}", channelId);
+            return PublishResult.Fail(PublishFailureKind.Transient, ex.Message);
+        }
+        catch (TaskCanceledException ex)
+        {
+            _logger.LogWarning(ex, "Timeout while sending profile alert to channel {ChannelId}", channelId);
+            return PublishResult.Fail(PublishFailureKind.Transient, ex.Message);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Fatal error while sending profile alert to channel {ChannelId}", channelId);
+            return PublishResult.Fail(PublishFailureKind.Fatal, ex.Message);
+        }
+    }
+
+    private async Task<IMessageChannel?> ResolveMessageChannelAsync(ulong channelId, CancellationToken cancellationToken)
+    {
+        var channel = _client.GetChannel(channelId) as IMessageChannel;
+        if (channel is not null)
+        {
+            return channel;
+        }
+
+        var requestOptions = new RequestOptions { CancelToken = cancellationToken };
+        return await _client.GetChannelAsync(channelId, requestOptions) as IMessageChannel;
     }
 
     private static bool IsInvalidUrlPayload(HttpException ex)

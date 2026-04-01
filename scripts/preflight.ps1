@@ -86,6 +86,11 @@ if ($envMap.ContainsKey("FEEDPROVIDERS__ENABLERSSHUB")) {
     $enableRssHub = $envMap["FEEDPROVIDERS__ENABLERSSHUB"].ToLowerInvariant() -eq "true"
 }
 
+$enableProfileAlerts = $false
+if ($envMap.ContainsKey("FEEDPROVIDERS__ENABLEFACEBOOKPROFILEALERTS")) {
+    $enableProfileAlerts = $envMap["FEEDPROVIDERS__ENABLEFACEBOOKPROFILEALERTS"].ToLowerInvariant() -eq "true"
+}
+
 if ($enableRssHub) {
     if ($envMap.ContainsKey("FEEDPROVIDERS__RSSHUBBASEURL") -and -not [string]::IsNullOrWhiteSpace($envMap["FEEDPROVIDERS__RSSHUBBASEURL"])) {
         Pass "RSSHub enabled and FEEDPROVIDERS__RSSHUBBASEURL is set"
@@ -96,6 +101,31 @@ if ($enableRssHub) {
 }
 else {
     Info "RSSHub provider disabled (FEEDPROVIDERS__ENABLERSSHUB=false)"
+}
+
+if ($enableProfileAlerts) {
+    if ($envMap.ContainsKey("FEEDPROVIDERS__FACEBOOKPROFILEALERTCHANNELID") -and
+        -not [string]::IsNullOrWhiteSpace($envMap["FEEDPROVIDERS__FACEBOOKPROFILEALERTCHANNELID"]) -and
+        $envMap["FEEDPROVIDERS__FACEBOOKPROFILEALERTCHANNELID"] -ne "0") {
+        Pass "Profile alerts enabled and FEEDPROVIDERS__FACEBOOKPROFILEALERTCHANNELID is set"
+    }
+    else {
+        Fail "Profile alerts enabled but FEEDPROVIDERS__FACEBOOKPROFILEALERTCHANNELID is missing or 0"
+    }
+
+    if ($enableRssHub) {
+        Pass "Profile alerts enabled with RSSHub support"
+    }
+    else {
+        Fail "Profile alerts enabled but RSSHub provider is disabled"
+    }
+
+    if ($envMap.ContainsKey("FB_COOKIE") -and -not [string]::IsNullOrWhiteSpace($envMap["FB_COOKIE"])) {
+        Pass "FB_COOKIE is present for profile feed access"
+    }
+    else {
+        Fail "Profile alerts enabled but FB_COOKIE is missing"
+    }
 }
 
 $portChecks = @(3000, 55432)

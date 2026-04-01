@@ -68,7 +68,7 @@ If you need source-run mode:
 
 Notes:
 - The script creates a backup dump under `backups/` unless `-SkipBackup` is provided.
-- Verify `tracked_feeds` columns include `Platform`, `Provider`, and `SourceKey` after apply.
+- Verify `tracked_feeds` columns include `Platform`, `SourceType`, `Provider`, and `SourceKey` after apply.
 
 ## Deploy with Docker
 
@@ -105,22 +105,28 @@ Manual checks:
 - New tweet is published once only
 
 The smoke script now verifies:
-- `tracked_feeds` includes `Platform`, `Provider`, `SourceKey`
-- Active feed summary grouped by `Platform` and `Provider`
+- `tracked_feeds` includes `Platform`, `SourceType`, `Provider`, `SourceKey`
+- Active feed summary grouped by `Platform`, `SourceType`, and `Provider`
 - Slash command registration summary contains: `add-x/list-x/remove-x`, `add-fb/list-fb/remove-fb`, `add-link/list-links/remove-link`
 
 ## Integration Evidence (Fanpage + Direct RSS)
 After you run `/add-fb` and `/add-link` with real test inputs, verify persisted mapping and publish evidence:
 
 ```powershell
-.\scripts\integration-evidence.ps1 -ComposeMode prod -FanpageSource nasa -DirectRssUrl "https://example.com/feed.xml" -LookbackMinutes 180
+.\scripts\integration-evidence.ps1 -ComposeMode prod -FanpageSource nasa -FacebookSourceType fanpage -DirectRssUrl "https://example.com/feed.xml" -LookbackMinutes 180
 ```
 
 This script checks:
-- `tracked_feeds` contains fanpage mapping (`Platform=Facebook`, `Provider=RssHub` or `Provider=RssBridge`)
+- `tracked_feeds` contains Facebook source mapping with requested source type (`Platform=Facebook`, `SourceType=Fanpage|Profile`, `Provider=RssHub` or `Provider=RssBridge`)
 - `tracked_feeds` contains direct RSS mapping (`Provider=DirectRss`)
 - `processed_tweets` contains publish evidence for the configured lookback window
 - bot logs include publish activity pattern
+
+For personal profile validation, use:
+
+```powershell
+.\scripts\integration-evidence.ps1 -ComposeMode prod -FanpageSource 1000xxxx -FacebookSourceType profile -LookbackMinutes 360
+```
 
 ## Facebook Source Pre-check (Batch)
 Before running `/add-fb` on many fanpages, pre-check source health against RSS-Bridge:
@@ -141,6 +147,19 @@ Recommendation meanings:
 - `retry-later`: feed has no entries at this moment; retry later before deciding
 - `check-rss-bridge`: request failed; verify `rss-bridge` container and URL
 - `invalid-source`: source cannot be normalized (bad ID/URL format)
+
+## Facebook Profile Safety Alerts
+When enabling profile feeds via RSSHub cookies, configure these env vars in `.env`:
+- `FEEDPROVIDERS__ENABLEFACEBOOKPROFILEALERTS=true`
+- `FEEDPROVIDERS__FACEBOOKPROFILEALERTCHANNELID=<discord_channel_id>`
+- `FEEDPROVIDERS__FACEBOOKPROFILEFAILURETHRESHOLD=3`
+- `FEEDPROVIDERS__FACEBOOKPROFILEALERTCOOLDOWNMINUTES=180`
+- `FB_COOKIE=<facebook_cookie_value>`
+
+Alert behavior:
+- The worker tracks consecutive profile fetch failures (`HTTP 403`, error-only feed, or repeated empty feed after prior success).
+- Once threshold is reached, bot sends a warning to admin alert channel.
+- Cooldown prevents alert spam for the same profile source.
 
 ## Logs and Diagnostics
 

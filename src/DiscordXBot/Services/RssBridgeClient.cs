@@ -1,4 +1,5 @@
 using System.ServiceModel.Syndication;
+using System.Net;
 using System.Xml;
 using DiscordXBot.Configuration;
 using DiscordXBot.Data.Entities;
@@ -31,65 +32,129 @@ public sealed class RssBridgeClient(
 
     public async Task<IReadOnlyList<RssPost>> GetPostsAsync(TrackedFeed trackedFeed, int maxItems, CancellationToken cancellationToken)
     {
+        var result = await GetPostsDetailedAsync(trackedFeed, maxItems, cancellationToken);
+        return result.Posts;
+    }
+
+    public async Task<FeedFetchResult> GetPostsDetailedAsync(TrackedFeed trackedFeed, int maxItems, CancellationToken cancellationToken)
+    {
         var rssUrl = trackedFeed.RssUrl;
         var client = _httpClientFactory.CreateClient();
 
-        using var response = await client.GetAsync(rssUrl, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
-        response.EnsureSuccessStatusCode();
-
-        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
-        using var reader = XmlReader.Create(stream, new XmlReaderSettings { Async = false });
-        var feed = SyndicationFeed.Load(reader);
-
-        if (feed?.Items is null)
+        try
         {
-            return [];
-        }
-
-        var filteredItems = feed.Items
-            .Where(item => !IsBridgeErrorItem(item))
-            .ToList();
-
-        var skippedErrorItems = feed.Items.Count() - filteredItems.Count;
-        if (skippedErrorItems > 0)
-        {
-            _logger.LogWarning(
-                "Skipped {Count} RSS-Bridge error item(s) from {RssUrl}",
-                skippedErrorItems,
-                rssUrl);
-        }
-
-        var posts = filteredItems
-            .Select(MapItem)
-            .Where(x => !string.IsNullOrWhiteSpace(x.TweetId))
-            .Take(Math.Max(1, maxItems))
-            .ToList();
-
-        if (posts.Count == 0 && skippedErrorItems > 0 &&
-            trackedFeed.Platform == FeedPlatform.X &&
-            trackedFeed.Provider == FeedProvider.RssBridge)
-        {
-            var fallbackPosts = await TryFetchNitterFallbackAsync(
-                rssUrl,
-                trackedFeed.SourceKey,
-                maxItems,
-                cancellationToken);
-            if (fallbackPosts.Count > 0)
+            using var response = await client.GetAsync(rssUrl, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+            if (!response.IsSuccessStatusCode)
             {
-                return fallbackPosts;
+                return BuildHttpFailureResult(response.StatusCode, rssUrl);
             }
-        }
 
-        if (posts.Count == 0 && skippedErrorItems > 0)
+            await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+            using var reader = XmlReader.Create(stream, new XmlReaderSettings { Async = false });
+            var feed = SyndicationFeed.Load(reader);
+
+            if (feed?.Items is null)
+            {
+                return FeedFetchResult.Empty("Feed has no items.");
+            }
+
+            var filteredItems = feed.Items
+                .Where(item => !IsBridgeErrorItem(item))
+                .ToList();
+
+            var skippedErrorItems = feed.Items.Count() - filteredItems.Count;
+            if (skippedErrorItems > 0)
+            {
+                _logger.LogWarning(
+                    "Skipped {Count} RSS-Bridge error item(s) from {RssUrl}",
+                    skippedErrorItems,
+                    rssUrl);
+            }
+
+            var posts = filteredItems
+                .Select(MapItem)
+                .Where(x => !string.IsNullOrWhiteSpace(x.TweetId))
+                .Take(Math.Max(1, maxItems))
+                .ToList();
+
+            if (posts.Count == 0 && skippedErrorItems > 0 &&
+                trackedFeed.Platform == FeedPlatform.X &&
+                trackedFeed.Provider == FeedProvider.RssBridge)
+            {
+                var fallbackPosts = await TryFetchNitterFallbackAsync(
+                    rssUrl,
+                    trackedFeed.SourceKey,
+                    maxItems,
+                    cancellationToken);
+                if (fallbackPosts.Count > 0)
+                {
+                    return FeedFetchResult.Success(fallbackPosts);
+                }
+            }
+
+            if (posts.Count == 0 && skippedErrorItems > 0)
+            {
+                _logger.LogWarning(
+                    "Feed source {SourceKey} returned only bridge error item(s). Check source visibility/public posts. Url={RssUrl}",
+                    trackedFeed.SourceKey,
+                    rssUrl);
+
+                return FeedFetchResult.ErrorOnly("Feed contains only bridge error items.");
+            }
+
+            if (posts.Count == 0)
+            {
+                return FeedFetchResult.Empty("Feed returned no usable posts.");
+            }
+
+            _logger.LogDebug("Fetched {Count} post(s) from {RssUrl}", posts.Count, rssUrl);
+            return FeedFetchResult.Success(posts);
+        }
+        catch (OperationCanceledException ex) when (!cancellationToken.IsCancellationRequested)
         {
-            _logger.LogWarning(
-                "Feed source {SourceKey} returned only bridge error item(s). Check source visibility/public posts. Url={RssUrl}",
-                trackedFeed.SourceKey,
-                rssUrl);
+            _logger.LogWarning(ex, "RSS fetch timed out for {RssUrl}", rssUrl);
+            return FeedFetchResult.NetworkError("RSS request timed out.");
+        }
+        catch (HttpRequestException ex)
+        {
+            if (ex.StatusCode == HttpStatusCode.Forbidden)
+            {
+                return FeedFetchResult.HttpForbidden("Provider returned HTTP 403.");
+            }
+
+            if (ex.StatusCode.HasValue)
+            {
+                return FeedFetchResult.HttpError((int)ex.StatusCode.Value, ex.Message);
+            }
+
+            return FeedFetchResult.NetworkError(ex.Message);
+        }
+        catch (XmlException ex)
+        {
+            _logger.LogWarning(ex, "RSS parse error for {RssUrl}", rssUrl);
+            return FeedFetchResult.ParseError(ex.Message);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Unexpected RSS fetch error for {RssUrl}", rssUrl);
+            return FeedFetchResult.NetworkError(ex.Message);
+        }
+    }
+
+    private FeedFetchResult BuildHttpFailureResult(HttpStatusCode statusCode, string rssUrl)
+    {
+        var numericCode = (int)statusCode;
+        _logger.LogWarning(
+            "RSS provider returned HTTP {StatusCode} for {RssUrl}",
+            numericCode,
+            rssUrl);
+
+        if (statusCode == HttpStatusCode.Forbidden)
+        {
+            return FeedFetchResult.HttpForbidden("Provider returned HTTP 403.");
         }
 
-        _logger.LogDebug("Fetched {Count} post(s) from {RssUrl}", posts.Count, rssUrl);
-        return posts;
+        return FeedFetchResult.HttpError(numericCode, $"Provider returned HTTP {numericCode}.");
     }
 
     private async Task<IReadOnlyList<RssPost>> TryFetchNitterFallbackAsync(

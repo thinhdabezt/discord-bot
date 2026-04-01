@@ -11,4 +11,8 @@ public sealed class FeedProviderOptions
     public string RssHubBaseUrl { get; set; } = "http://rsshub:1200";
     public FeedProvider DefaultXProvider { get; set; } = FeedProvider.RssBridge;
     public FeedProvider DefaultFacebookProvider { get; set; } = FeedProvider.RssHub;
+    public bool EnableFacebookProfileAlerts { get; set; } = false;
+    public ulong FacebookProfileAlertChannelId { get; set; }
+    public int FacebookProfileFailureThreshold { get; set; } = 3;
+    public int FacebookProfileAlertCooldownMinutes { get; set; } = 180;
 }
