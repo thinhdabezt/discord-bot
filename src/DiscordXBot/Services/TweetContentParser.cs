@@ -1,4 +1,6 @@
 using System.Net;
+using System.Text.RegularExpressions;
+using DiscordXBot.Data.Entities;
 using HtmlAgilityPack;
 using DiscordXBot.Services.Models;
 
@@ -6,15 +8,15 @@ namespace DiscordXBot.Services;
 
 public sealed class TweetContentParser
 {
-    public ParsedTweetContent Parse(RssPost post)
+    public ParsedTweetContent Parse(RssPost post, FeedPlatform platform = FeedPlatform.X)
     {
-        var (imageUrls, mediaType) = AnalyzeMedia(post.SummaryHtml);
-        var caption = ExtractCaption(post.Title, post.SummaryHtml, post.Url);
+        var (imageUrls, mediaType) = AnalyzeMedia(post.SummaryHtml, platform);
+        var caption = ExtractCaption(post.Title, post.SummaryHtml, post.Url, platform);
 
         return new ParsedTweetContent(caption, imageUrls, mediaType, post.PublishedAtUtc);
     }
 
-    private static (IReadOnlyList<string> ImageUrls, ParsedMediaType MediaType) AnalyzeMedia(string html)
+    private static (IReadOnlyList<string> ImageUrls, ParsedMediaType MediaType) AnalyzeMedia(string html, FeedPlatform platform)
     {
         if (string.IsNullOrWhiteSpace(html))
         {
@@ -48,7 +50,7 @@ public sealed class TweetContentParser
                 continue;
             }
 
-            var normalized = NormalizeImageUrl(rawUrl);
+            var normalized = NormalizeImageUrl(rawUrl, platform);
             var sanitized = DiscordUrlSanitizer.Sanitize(normalized);
             if (sanitized is null)
             {
@@ -58,8 +60,7 @@ public sealed class TweetContentParser
             images.Add(sanitized);
         }
 
-        images = images
-            .Distinct(StringComparer.OrdinalIgnoreCase)
+        images = DeduplicateImageUrls(images, platform)
             .ToList();
 
         var hasImage = images.Count > 0;
@@ -137,25 +138,18 @@ public sealed class TweetContentParser
                decoded.Contains("amplify_video_thumb/", StringComparison.OrdinalIgnoreCase);
     }
 
-    private static string ExtractCaption(string title, string html, string fallbackUrl)
+    private static string ExtractCaption(string title, string html, string fallbackUrl, FeedPlatform platform)
     {
         var caption = title;
 
         if (string.IsNullOrWhiteSpace(caption) && !string.IsNullOrWhiteSpace(html))
         {
-            var doc = new HtmlDocument();
-            doc.LoadHtml(html);
+            caption = ExtractTextFromHtml(html);
+        }
 
-            var imageNodes = doc.DocumentNode.SelectNodes("//img");
-            if (imageNodes is not null)
-            {
-                foreach (var node in imageNodes)
-                {
-                    node.Remove();
-                }
-            }
-
-            caption = WebUtility.HtmlDecode(doc.DocumentNode.InnerText).Trim();
+        if (platform == FeedPlatform.Facebook)
+        {
+            caption = CleanFacebookCaption(caption);
         }
 
         if (string.IsNullOrWhiteSpace(caption))
@@ -171,7 +165,7 @@ public sealed class TweetContentParser
         return caption;
     }
 
-    private static string NormalizeImageUrl(string url)
+    private static string NormalizeImageUrl(string url, FeedPlatform platform)
     {
         var normalized = WebUtility.HtmlDecode(url).Trim();
 
@@ -182,7 +176,8 @@ public sealed class TweetContentParser
 
         normalized = NormalizeNitterImageUrl(normalized);
 
-        if (normalized.Contains("pbs.twimg.com", StringComparison.OrdinalIgnoreCase))
+        if (platform == FeedPlatform.X &&
+            normalized.Contains("pbs.twimg.com", StringComparison.OrdinalIgnoreCase))
         {
             normalized = normalized
                 .Replace(":small", ":orig", StringComparison.OrdinalIgnoreCase)
@@ -192,7 +187,191 @@ public sealed class TweetContentParser
                 .Replace("name=medium", "name=orig", StringComparison.OrdinalIgnoreCase);
         }
 
+        if (platform == FeedPlatform.Facebook)
+        {
+            normalized = NormalizeFacebookImageUrl(normalized);
+        }
+
         return normalized;
+    }
+
+    private static string ExtractTextFromHtml(string html)
+    {
+        var doc = new HtmlDocument();
+        doc.LoadHtml(html);
+
+        var removableNodes = doc.DocumentNode.SelectNodes("//img|//script|//style");
+        if (removableNodes is not null)
+        {
+            foreach (var node in removableNodes)
+            {
+                node.Remove();
+            }
+        }
+
+        return WebUtility.HtmlDecode(doc.DocumentNode.InnerText).Trim();
+    }
+
+    private static string CleanFacebookCaption(string caption)
+    {
+        if (string.IsNullOrWhiteSpace(caption))
+        {
+            return string.Empty;
+        }
+
+        var cleaned = WebUtility.HtmlDecode(caption);
+        cleaned = Regex.Replace(cleaned, @"https?://\S+", string.Empty, RegexOptions.IgnoreCase);
+
+        var lines = cleaned
+            .Replace("\r\n", "\n", StringComparison.Ordinal)
+            .Split('\n', StringSplitOptions.RemoveEmptyEntries)
+            .Select(x => Regex.Replace(x, @"\s+", " ").Trim())
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Where(x => !IsFacebookNoiseLine(x))
+            .Select(DeduplicateHashtagsInLine)
+            .ToList();
+
+        return string.Join("\n", lines).Trim();
+    }
+
+    private static string DeduplicateHashtagsInLine(string line)
+    {
+        var seenHashtags = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var output = new List<string>();
+
+        foreach (var token in line.Split(' ', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var hashtag = token.TrimEnd('.', ',', ';', ':', '!', '?');
+            if (hashtag.StartsWith('#') && hashtag.Length > 1)
+            {
+                var hashtagKey = hashtag[1..];
+                if (!seenHashtags.Add(hashtagKey))
+                {
+                    continue;
+                }
+            }
+
+            output.Add(token);
+        }
+
+        return string.Join(" ", output);
+    }
+
+    private static bool IsFacebookNoiseLine(string line)
+    {
+        return line.Equals("See more", StringComparison.OrdinalIgnoreCase) ||
+               line.Equals("View on Facebook", StringComparison.OrdinalIgnoreCase) ||
+               line.Equals("View post on Facebook", StringComparison.OrdinalIgnoreCase) ||
+               line.Equals("Like Comment Share", StringComparison.OrdinalIgnoreCase) ||
+               line.StartsWith("All reactions", StringComparison.OrdinalIgnoreCase) ||
+               Regex.IsMatch(line, @"^\d+\s+(likes?|comments?|shares?)$", RegexOptions.IgnoreCase);
+    }
+
+    private static string NormalizeFacebookImageUrl(string url)
+    {
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri))
+        {
+            return url;
+        }
+
+        if (uri.AbsolutePath.Contains("safe_image.php", StringComparison.OrdinalIgnoreCase) &&
+            TryReadQueryValue(uri.Query, "url", out var safeImageTarget) &&
+            Uri.TryCreate(safeImageTarget, UriKind.Absolute, out _))
+        {
+            return safeImageTarget;
+        }
+
+        if ((uri.Host.Equals("l.facebook.com", StringComparison.OrdinalIgnoreCase) ||
+             uri.Host.Equals("lm.facebook.com", StringComparison.OrdinalIgnoreCase)) &&
+            TryReadQueryValue(uri.Query, "u", out var externalTarget) &&
+            Uri.TryCreate(externalTarget, UriKind.Absolute, out _))
+        {
+            return externalTarget;
+        }
+
+        return url;
+    }
+
+    private static bool TryReadQueryValue(string query, string key, out string value)
+    {
+        value = string.Empty;
+        if (string.IsNullOrWhiteSpace(query))
+        {
+            return false;
+        }
+
+        var trimmed = query.TrimStart('?');
+        foreach (var part in trimmed.Split('&', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var pair = part.Split('=', 2);
+            if (pair.Length != 2)
+            {
+                continue;
+            }
+
+            if (!pair[0].Equals(key, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            value = Uri.UnescapeDataString(pair[1]);
+            return !string.IsNullOrWhiteSpace(value);
+        }
+
+        return false;
+    }
+
+    private static IReadOnlyList<string> DeduplicateImageUrls(IEnumerable<string> images, FeedPlatform platform)
+    {
+        var output = new List<string>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var image in images)
+        {
+            var dedupeKey = BuildImageDedupeKey(image, platform);
+            if (!seen.Add(dedupeKey))
+            {
+                continue;
+            }
+
+            output.Add(image);
+        }
+
+        return output;
+    }
+
+    private static string BuildImageDedupeKey(string imageUrl, FeedPlatform platform)
+    {
+        if (platform != FeedPlatform.Facebook)
+        {
+            return imageUrl;
+        }
+
+        if (!Uri.TryCreate(imageUrl, UriKind.Absolute, out var uri))
+        {
+            return imageUrl;
+        }
+
+        if (uri.Host.Contains("fbcdn.net", StringComparison.OrdinalIgnoreCase) ||
+            uri.Host.Contains("scontent", StringComparison.OrdinalIgnoreCase))
+        {
+            return $"{uri.Host.ToLowerInvariant()}{uri.AbsolutePath.ToLowerInvariant()}";
+        }
+
+        var filteredQuery = string.Join(
+            "&",
+            uri.Query
+                .TrimStart('?')
+                .Split('&', StringSplitOptions.RemoveEmptyEntries)
+                .Where(x => !x.StartsWith("utm_", StringComparison.OrdinalIgnoreCase) &&
+                            !x.StartsWith("fbclid=", StringComparison.OrdinalIgnoreCase) &&
+                            !x.StartsWith("refsrc=", StringComparison.OrdinalIgnoreCase) &&
+                            !x.StartsWith("__tn__=", StringComparison.OrdinalIgnoreCase))
+                .OrderBy(x => x, StringComparer.OrdinalIgnoreCase));
+
+        return string.IsNullOrWhiteSpace(filteredQuery)
+            ? $"{uri.Host.ToLowerInvariant()}{uri.AbsolutePath.ToLowerInvariant()}"
+            : $"{uri.Host.ToLowerInvariant()}{uri.AbsolutePath.ToLowerInvariant()}?{filteredQuery}";
     }
 
     private static string NormalizeNitterImageUrl(string url)

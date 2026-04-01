@@ -1,5 +1,6 @@
 using DiscordXBot.Services;
 using DiscordXBot.Services.Models;
+using DiscordXBot.Data.Entities;
 
 namespace DiscordXBot.Tests.Services;
 
@@ -192,5 +193,43 @@ public class TweetContentParserTests
         var result = _parser.Parse(post);
 
         Assert.Equal(publishedAtUtc, result.PostedAtUtc);
+    }
+
+    [Fact]
+    public void Parse_Facebook_CleansCaptionAndDeduplicatesAlbumImages()
+    {
+        var post = new RssPost(
+            TweetId: "fb-1",
+            Url: "https://www.facebook.com/nasa/posts/123",
+            Title: "Big launch today! https://facebook.com/story.php?story_fbid=123 #Space #Space #NASA",
+            SummaryHtml:
+                "<p>See more</p>" +
+                "<img src='https://scontent.xx.fbcdn.net/v/t39.30808-6/12345_67890_n.jpg?_nc_cat=102&stp=dst-jpg_s640x640&_nc_ht=scontent.xx.fbcdn.net&oh=00_AfA&oe=65A1'/>" +
+                "<img src='https://scontent.xx.fbcdn.net/v/t39.30808-6/12345_67890_n.jpg?_nc_cat=102&stp=dst-jpg_p960x960&_nc_ht=scontent.xx.fbcdn.net&oh=00_BfB&oe=65A2'/>",
+            PublishedAtUtc: DateTime.UtcNow);
+
+        var result = _parser.Parse(post, FeedPlatform.Facebook);
+
+        Assert.Equal("Big launch today! #Space #NASA", result.Caption);
+        Assert.Single(result.ImageUrls);
+        Assert.Equal(ParsedMediaType.ImageOnly, result.MediaType);
+    }
+
+    [Fact]
+    public void Parse_Facebook_NormalizesSafeImageRedirectUrl()
+    {
+        var post = new RssPost(
+            TweetId: "fb-2",
+            Url: "https://www.facebook.com/page/posts/1",
+            Title: "",
+            SummaryHtml: "<img src='https://www.facebook.com/safe_image.php?url=https%3A%2F%2Fimages.example.com%2Fcover.jpg&w=960&h=504' />",
+            PublishedAtUtc: DateTime.UtcNow);
+
+        var result = _parser.Parse(post, FeedPlatform.Facebook);
+
+        Assert.Equal("https://www.facebook.com/page/posts/1", result.Caption);
+        Assert.Single(result.ImageUrls);
+        Assert.Equal("https://images.example.com/cover.jpg", result.ImageUrls[0]);
+        Assert.Equal(ParsedMediaType.ImageOnly, result.MediaType);
     }
 }

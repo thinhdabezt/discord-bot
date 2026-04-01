@@ -117,13 +117,13 @@ public class Worker : BackgroundService
 
             foreach (var post in posts.OrderBy(x => x.PublishedAtUtc))
             {
-                var parsed = _tweetContentParser.Parse(post);
+                var parsed = _tweetContentParser.Parse(post, sampleFeed.Platform);
 
                 if (parsed.MediaType != ParsedMediaType.ImageOnly)
                 {
                     mediaFilteredSkips += group.Count();
                     _logger.LogInformation(
-                        "Skipping tweet {TweetId} for @{Username}: media type {MediaType} is not allowed by image-only filter.",
+                        "Skipping post {PostId} for source {FeedLabel}: media type {MediaType} is not allowed by image-only filter.",
                         post.TweetId,
                         feedLabel,
                         parsed.MediaType);
