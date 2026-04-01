@@ -13,6 +13,7 @@ This guide covers two deployment modes:
 - [scripts/preflight.ps1](scripts/preflight.ps1): pre-deploy checks
 - [scripts/smoke-test.ps1](scripts/smoke-test.ps1): post-deploy checks
 - [docs/ops-checklist.md](docs/ops-checklist.md): operations checklist
+- [docs/RELEASE-HANDOFF-2026-04-01.md](docs/RELEASE-HANDOFF-2026-04-01.md): phase summary and production handoff for this rollout
 
 ## Prerequisites
 - Docker Desktop with WSL2 enabled
