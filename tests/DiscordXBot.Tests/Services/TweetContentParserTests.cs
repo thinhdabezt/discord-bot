@@ -227,9 +227,26 @@ public class TweetContentParserTests
 
         var result = _parser.Parse(post, FeedPlatform.Facebook);
 
-        Assert.Equal("https://www.facebook.com/page/posts/1", result.Caption);
+        Assert.Equal(string.Empty, result.Caption);
         Assert.Single(result.ImageUrls);
         Assert.Equal("https://images.example.com/cover.jpg", result.ImageUrls[0]);
         Assert.Equal(ParsedMediaType.ImageOnly, result.MediaType);
+    }
+
+    [Fact]
+    public void Parse_Facebook_FiltersLoginPreviewNoiseLines()
+    {
+        var post = new RssPost(
+            TweetId: "fb-3",
+            Url: "https://www.facebook.com/100057435399770/",
+            Title: "Log in or sign up to view\nSee posts, photos and more on Facebook.",
+            SummaryHtml: "<p>Log in or sign up to view</p><p>See posts, photos and more on Facebook.</p>",
+            PublishedAtUtc: DateTime.UtcNow);
+
+        var result = _parser.Parse(post, FeedPlatform.Facebook);
+
+        Assert.Equal(string.Empty, result.Caption);
+        Assert.Empty(result.ImageUrls);
+        Assert.Equal(ParsedMediaType.CaptionOnly, result.MediaType);
     }
 }

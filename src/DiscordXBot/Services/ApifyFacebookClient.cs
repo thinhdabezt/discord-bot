@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using DiscordXBot.Configuration;
 using DiscordXBot.Data.Entities;
 using DiscordXBot.Services.Models;
@@ -245,9 +246,7 @@ public sealed class ApifyFacebookClient(
 
     private static RssPost? MapItemToPost(JsonElement item)
     {
-        var postUrl = GetString(item, "topLevelUrl")
-            ?? GetString(item, "url")
-            ?? string.Empty;
+        var postUrl = ResolvePostUrl(item);
 
         if (string.IsNullOrWhiteSpace(postUrl) || !Uri.TryCreate(postUrl, UriKind.Absolute, out _))
         {
@@ -258,13 +257,19 @@ public sealed class ApifyFacebookClient(
             ?? GetString(item, "id")
             ?? postUrl;
 
-        var text = GetString(item, "text")
+        var rawText = GetString(item, "text")
             ?? GetString(item, "postText")
             ?? GetString(item, "caption")
             ?? string.Empty;
+        var text = NormalizeText(rawText);
 
         var publishedAtUtc = ResolvePublishedAtUtc(item);
         var imageUrls = ExtractImageUrls(item);
+
+        if (!HasUsablePostContent(text, imageUrls, postUrl))
+        {
+            return null;
+        }
 
         var title = string.IsNullOrWhiteSpace(text)
             ? postUrl
@@ -361,6 +366,11 @@ public sealed class ApifyFacebookClient(
             return;
         }
 
+        if (!IsLikelyImageUrl(uri))
+        {
+            return;
+        }
+
         if (urls.Contains(candidate, StringComparer.OrdinalIgnoreCase))
         {
             return;
@@ -445,6 +455,131 @@ public sealed class ApifyFacebookClient(
         var baseUrl = apiBaseUrl.TrimEnd('/');
         var boundedLimit = Math.Max(1, limit);
         return $"{baseUrl}/datasets/{Uri.EscapeDataString(datasetId)}/items?token={Uri.EscapeDataString(token)}&format=json&clean=true&desc=true&limit={boundedLimit}";
+    }
+
+    private static string ResolvePostUrl(JsonElement item)
+    {
+        var candidates = new[]
+        {
+            GetString(item, "postUrl"),
+            GetString(item, "facebookUrl"),
+            GetString(item, "permalink"),
+            GetString(item, "link"),
+            GetString(item, "topLevelUrl"),
+            GetString(item, "url")
+        };
+
+        return candidates.FirstOrDefault(x => !string.IsNullOrWhiteSpace(x)) ?? string.Empty;
+    }
+
+    private static string NormalizeText(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return string.Empty;
+        }
+
+        var normalized = WebUtility.HtmlDecode(text)
+            .Replace("\r\n", "\n", StringComparison.Ordinal)
+            .Trim();
+
+        if (IsPlaceholderText(normalized))
+        {
+            return string.Empty;
+        }
+
+        return normalized;
+    }
+
+    private static bool HasUsablePostContent(string text, IReadOnlyList<string> imageUrls, string postUrl)
+    {
+        if (!string.IsNullOrWhiteSpace(text) || imageUrls.Count > 0)
+        {
+            return true;
+        }
+
+        return !IsFacebookPageRootUrl(postUrl);
+    }
+
+    private static bool IsPlaceholderText(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return true;
+        }
+
+        var compact = Regex.Replace(text, @"\s+", " ").Trim();
+
+        if (compact.Equals("Log in or sign up to view", StringComparison.OrdinalIgnoreCase) ||
+            compact.Equals("See posts, photos and more on Facebook.", StringComparison.OrdinalIgnoreCase) ||
+            compact.Equals("See posts, photos and more on Facebook", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        return compact.Contains("Log in or sign up to view", StringComparison.OrdinalIgnoreCase) &&
+               compact.Contains("Facebook", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsFacebookPageRootUrl(string url)
+    {
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri))
+        {
+            return true;
+        }
+
+        if (!uri.Host.Contains("facebook.com", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        var path = uri.AbsolutePath.Trim('/');
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return true;
+        }
+
+        var hasPostMarkers = path.Contains("/posts/", StringComparison.OrdinalIgnoreCase)
+            || path.Contains("/permalink/", StringComparison.OrdinalIgnoreCase)
+            || path.Contains("story.php", StringComparison.OrdinalIgnoreCase)
+            || path.Contains("photo", StringComparison.OrdinalIgnoreCase)
+            || path.Contains("videos", StringComparison.OrdinalIgnoreCase)
+            || path.Contains("reel", StringComparison.OrdinalIgnoreCase);
+
+        if (hasPostMarkers)
+        {
+            return false;
+        }
+
+        return path.Split('/').Length <= 1;
+    }
+
+    private static bool IsLikelyImageUrl(Uri uri)
+    {
+        var host = uri.Host;
+        if (host.Contains("fbcdn.net", StringComparison.OrdinalIgnoreCase) ||
+            host.Contains("scontent", StringComparison.OrdinalIgnoreCase) ||
+            host.Contains("fbsbx.com", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        var path = uri.AbsolutePath;
+        if (path.EndsWith(".jpg", StringComparison.OrdinalIgnoreCase) ||
+            path.EndsWith(".jpeg", StringComparison.OrdinalIgnoreCase) ||
+            path.EndsWith(".png", StringComparison.OrdinalIgnoreCase) ||
+            path.EndsWith(".webp", StringComparison.OrdinalIgnoreCase) ||
+            path.EndsWith(".gif", StringComparison.OrdinalIgnoreCase) ||
+            path.EndsWith(".bmp", StringComparison.OrdinalIgnoreCase) ||
+            path.EndsWith(".avif", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        var query = uri.Query;
+        return query.Contains("stp=", StringComparison.OrdinalIgnoreCase)
+            || query.Contains("_nc_cat=", StringComparison.OrdinalIgnoreCase)
+            || query.Contains("format=", StringComparison.OrdinalIgnoreCase);
     }
 
     private static string? GetString(JsonElement element, string propertyName)

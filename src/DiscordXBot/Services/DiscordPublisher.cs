@@ -53,6 +53,7 @@ public sealed class DiscordPublisher(
                 .Select(DiscordUrlSanitizer.Sanitize)
                 .Where(x => x is not null)
                 .Cast<string>()
+                .Where(IsLikelyEmbedImageUrl)
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToList();
 
@@ -298,5 +299,41 @@ public sealed class DiscordPublisher(
         }
 
         return postUrl;
+    }
+
+    private static bool IsLikelyEmbedImageUrl(string url)
+    {
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri))
+        {
+            return false;
+        }
+
+        var host = uri.Host;
+        if (host.Contains("pbs.twimg.com", StringComparison.OrdinalIgnoreCase) ||
+            host.Contains("fbcdn.net", StringComparison.OrdinalIgnoreCase) ||
+            host.Contains("scontent", StringComparison.OrdinalIgnoreCase) ||
+            host.Contains("cdninstagram.com", StringComparison.OrdinalIgnoreCase) ||
+            host.Contains("imgur.com", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        var path = uri.AbsolutePath;
+        if (path.EndsWith(".jpg", StringComparison.OrdinalIgnoreCase) ||
+            path.EndsWith(".jpeg", StringComparison.OrdinalIgnoreCase) ||
+            path.EndsWith(".png", StringComparison.OrdinalIgnoreCase) ||
+            path.EndsWith(".webp", StringComparison.OrdinalIgnoreCase) ||
+            path.EndsWith(".gif", StringComparison.OrdinalIgnoreCase) ||
+            path.EndsWith(".bmp", StringComparison.OrdinalIgnoreCase) ||
+            path.EndsWith(".avif", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        var query = uri.Query;
+        return query.Contains("stp=", StringComparison.OrdinalIgnoreCase)
+            || query.Contains("_nc_cat=", StringComparison.OrdinalIgnoreCase)
+            || query.Contains("format=", StringComparison.OrdinalIgnoreCase)
+            || query.Contains("name=", StringComparison.OrdinalIgnoreCase);
     }
 }

@@ -154,6 +154,11 @@ public sealed class TweetContentParser
 
         if (string.IsNullOrWhiteSpace(caption))
         {
+            if (platform == FeedPlatform.Facebook)
+            {
+                return string.Empty;
+            }
+
             caption = fallbackUrl;
         }
 
@@ -262,6 +267,9 @@ public sealed class TweetContentParser
         return line.Equals("See more", StringComparison.OrdinalIgnoreCase) ||
                line.Equals("View on Facebook", StringComparison.OrdinalIgnoreCase) ||
                line.Equals("View post on Facebook", StringComparison.OrdinalIgnoreCase) ||
+               line.Equals("Log in or sign up to view", StringComparison.OrdinalIgnoreCase) ||
+               line.Equals("See posts, photos and more on Facebook.", StringComparison.OrdinalIgnoreCase) ||
+               line.Equals("See posts, photos and more on Facebook", StringComparison.OrdinalIgnoreCase) ||
                line.Equals("Like Comment Share", StringComparison.OrdinalIgnoreCase) ||
                line.StartsWith("All reactions", StringComparison.OrdinalIgnoreCase) ||
                Regex.IsMatch(line, @"^\d+\s+(likes?|comments?|shares?)$", RegexOptions.IgnoreCase);
