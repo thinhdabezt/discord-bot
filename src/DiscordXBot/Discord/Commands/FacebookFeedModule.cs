@@ -164,7 +164,13 @@ public sealed class FacebookFeedModule(
             return;
         }
 
-        await ReplyAsync($"Added Facebook {sourceTypeLabel} {sourceKey} to {channel.Mention} via {selectedProvider}.");
+        var addedMessage = $"Added Facebook {sourceTypeLabel} {sourceKey} to {channel.Mention} via {selectedProvider}.";
+        if (!string.IsNullOrWhiteSpace(validation.Warning))
+        {
+            addedMessage += $"\nNote: {validation.Warning}";
+        }
+
+        await ReplyAsync(addedMessage);
     }
 
     [SlashCommand("list-fb", "List tracked Facebook feeds in this guild")]
@@ -345,6 +351,20 @@ public sealed class FacebookFeedModule(
                     continue;
                 }
 
+                if ((int)response.StatusCode >= 500)
+                {
+                    var warning =
+                        $"Feed provider returned HTTP {(int)response.StatusCode} during validation. " +
+                        "Feed registration is allowed and runtime fallback/retry will handle temporary upstream issues.";
+
+                    _logger.LogWarning(
+                        "Allowing Facebook feed registration despite HTTP {StatusCode} validation result for {RssUrl}",
+                        (int)response.StatusCode,
+                        rssUrl);
+
+                    return FeedValidationResult.Valid(warning);
+                }
+
                 return FeedValidationResult.Invalid(
                     $"Received HTTP {(int)response.StatusCode} from feed provider.",
                     preferAddLink: false);
@@ -354,10 +374,27 @@ public sealed class FacebookFeedModule(
                 var delay = TimeSpan.FromSeconds(initialDelaySeconds * Math.Pow(2, attempt));
                 await Task.Delay(delay);
             }
+            catch (OperationCanceledException)
+            {
+                _logger.LogWarning(
+                    "Allowing Facebook feed registration after validation timeout for {RssUrl}",
+                    rssUrl);
+                return FeedValidationResult.Valid(
+                    "Feed validation timed out. Feed registration is allowed and runtime fallback/retry will continue in background.");
+            }
             catch (HttpRequestException) when (attempt < maxRetries)
             {
                 var delay = TimeSpan.FromSeconds(initialDelaySeconds * Math.Pow(2, attempt));
                 await Task.Delay(delay);
+            }
+            catch (HttpRequestException ex)
+            {
+                _logger.LogWarning(
+                    ex,
+                    "Allowing Facebook feed registration after validation network error for {RssUrl}",
+                    rssUrl);
+                return FeedValidationResult.Valid(
+                    "Feed validation hit a temporary network issue. Feed registration is allowed and runtime fallback/retry will continue in background.");
             }
             catch (Exception ex)
             {
@@ -366,7 +403,8 @@ public sealed class FacebookFeedModule(
             }
         }
 
-        return FeedValidationResult.Invalid("Feed validation retries exhausted.", preferAddLink: false);
+        return FeedValidationResult.Valid(
+            "Feed validation retries were exhausted. Feed registration is allowed and runtime fallback/retry will continue in background.");
     }
 
     private async Task ReplyAsync(string message, Embed? embed = null, bool ephemeral = true)
@@ -468,11 +506,11 @@ public sealed class FacebookFeedModule(
         return sourceType == FacebookSourceType.Profile ? "profile" : "fanpage";
     }
 
-    private sealed record FeedValidationResult(bool IsValid, string Reason, bool PreferAddLink)
+    private sealed record FeedValidationResult(bool IsValid, string Reason, bool PreferAddLink, string? Warning = null)
     {
-        public static FeedValidationResult Valid()
+        public static FeedValidationResult Valid(string? warning = null)
         {
-            return new FeedValidationResult(true, string.Empty, false);
+            return new FeedValidationResult(true, string.Empty, false, warning);
         }
 
         public static FeedValidationResult Invalid(string reason, bool preferAddLink)
