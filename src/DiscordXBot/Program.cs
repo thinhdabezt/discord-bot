@@ -47,13 +47,13 @@ builder.Services
 	.AddOptions<PublishOptions>()
 	.Bind(builder.Configuration.GetSection(PublishOptions.SectionName));
 
-var connectionString = builder.Configuration.GetConnectionString("Default");
+var connectionString = Environment.GetEnvironmentVariable("CONNECTIONSTRINGS__DEFAULT");
 if (string.IsNullOrWhiteSpace(connectionString))
 {
 	throw new OptionsValidationException(
 		"ConnectionStrings:Default",
 		typeof(string),
-		["Connection string is required. Set ConnectionStrings:Default via appsettings or environment variables."]);
+		["Connection string is required. Set CONNECTIONSTRINGS__DEFAULT environment variable."]);
 }
 
 builder.Services.AddDbContext<BotDbContext>(options => options.UseNpgsql(connectionString));
