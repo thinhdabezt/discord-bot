@@ -60,7 +60,7 @@ else {
 }
 
 $envMap = Parse-EnvFile -Path $EnvFile
-$requiredVars = @("DISCORD_TOKEN", "POSTGRES_PASSWORD")
+$requiredVars = @("DISCORD_TOKEN", "POSTGRES_PASSWORD", "RSSBRIDGE__BASEURL")
 $recommendedVars = @("DISCORD_GUILD_ID", "POSTGRES_DB", "POSTGRES_USER")
 
 foreach ($name in $requiredVars) {

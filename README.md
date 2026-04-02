@@ -83,7 +83,8 @@ Copy-Item .env.prod.example .env
 Cập nhật tối thiểu:
 
 * DISCORD\_TOKEN  
-* POSTGRES\_PASSWORD
+* POSTGRES\_PASSWORD  
+* RSSBRIDGE\_\_BASEURL
 
 Khuyến nghị cập nhật thêm:
 
@@ -97,6 +98,7 @@ Khuyến nghị cập nhật thêm:
 
 * Không commit .env.  
 * Chỉ commit các file .env.\*.example.
+* Khi chạy Docker compose prod, đặt RSSBRIDGE\_\_BASEURL=http://rss-bridge:80 (truy cập nội bộ giữa container).
 
 ### **5.2 Preflight**
 

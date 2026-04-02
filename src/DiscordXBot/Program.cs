@@ -19,7 +19,9 @@ builder.Services
 
 builder.Services
 	.AddOptions<RssBridgeOptions>()
-	.Bind(builder.Configuration.GetSection(RssBridgeOptions.SectionName));
+	.Bind(builder.Configuration.GetSection(RssBridgeOptions.SectionName))
+	.Validate(options => !string.IsNullOrWhiteSpace(options.BaseUrl), "RssBridge BaseUrl is required. Set RSSBRIDGE__BASEURL.")
+	.ValidateOnStart();
 
 builder.Services
 	.AddOptions<FeedProviderOptions>()
