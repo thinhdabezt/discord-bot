@@ -64,18 +64,21 @@ public class FeedUrlResolverTests
     }
 
     [Fact]
-    public void Resolve_ThrowsForFacebookProfileViaRssBridge()
+    public void Resolve_UsesRssBridgeForFacebookProfile()
     {
         var resolver = CreateResolver(
             new RssBridgeOptions { BaseUrl = "http://rss-bridge:80" },
             new FeedProviderOptions());
 
-        Assert.Throws<NotSupportedException>(() =>
-            resolver.Resolve(
-                FeedPlatform.Facebook,
-                FeedProvider.RssBridge,
-                "10001234567890",
-                FacebookSourceType.Profile));
+        var url = resolver.Resolve(
+            FeedPlatform.Facebook,
+            FeedProvider.RssBridge,
+            "10001234567890",
+            FacebookSourceType.Profile);
+
+        Assert.Equal(
+            "http://rss-bridge:80/?action=display&bridge=FacebookBridge&context=User&u=10001234567890&media_type=all&format=Atom",
+            url);
     }
 
     [Fact]

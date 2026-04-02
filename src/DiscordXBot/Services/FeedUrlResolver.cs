@@ -63,9 +63,8 @@ public sealed class FeedUrlResolver(
         return platform switch
         {
             FeedPlatform.X => $"{baseUrl}/?action=display&bridge=TwitterBridge&context=By+username&u={Uri.EscapeDataString(source)}&format=Atom",
-            FeedPlatform.Facebook when facebookSourceType == FacebookSourceType.Fanpage =>
+            FeedPlatform.Facebook =>
                 $"{baseUrl}/?action=display&bridge=FacebookBridge&context=User&u={Uri.EscapeDataString(source)}&media_type=all&format=Atom",
-            FeedPlatform.Facebook => throw new NotSupportedException("Facebook profile is not supported by RSS-Bridge provider."),
             _ => throw new NotSupportedException($"Unsupported platform: {platform}")
         };
     }

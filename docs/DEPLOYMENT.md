@@ -193,8 +193,8 @@ Runtime order:
 - Apify fallback (if RSS-Bridge did not recover usable posts and Apify policy allows)
 
 Notes:
-- With current resolver rules, RSS-Bridge fallback is intended for fanpage sources.
-- Keep profile flag off unless RSS-Bridge profile route support is explicitly added.
+- RSS-Bridge fallback now supports both fanpage and profile sources.
+- Keep profile flag off by default and enable per canary rollout to monitor source reliability.
 
 ## Logs and Diagnostics
 

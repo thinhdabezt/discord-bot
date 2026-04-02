@@ -83,13 +83,7 @@ public sealed class FacebookFeedModule(
         var selectedProvider = ParseProvider(provider) ?? _feedProviderOptions.CurrentValue.DefaultFacebookProvider;
         if (selectedProvider == FeedProvider.DirectRss)
         {
-            await ReplyAsync("/add-fb supports RSSHub or RSS-Bridge fanpage feeds. Use /add-link for direct FetchRSS URLs.");
-            return;
-        }
-
-        if (selectedSourceType == FacebookSourceType.Profile && selectedProvider != FeedProvider.RssHub)
-        {
-            await ReplyAsync("Facebook profile feeds currently support RSSHub only. Use provider=rsshub or use /add-link for a direct RSS URL.");
+            await ReplyAsync("/add-fb supports RSSHub or RSS-Bridge feeds. Use /add-link for direct FetchRSS URLs.");
             return;
         }
 
@@ -117,7 +111,7 @@ public sealed class FacebookFeedModule(
             return;
         }
 
-        var validation = await ValidateRssAsync(rssUrl, selectedProvider);
+        var validation = await ValidateRssAsync(rssUrl, selectedProvider, selectedSourceType);
         if (!validation.IsValid)
         {
             var suggestion = validation.PreferAddLink
@@ -165,7 +159,7 @@ public sealed class FacebookFeedModule(
         }
         catch (DbUpdateException ex) when (IsUniqueViolation(ex))
         {
-            _logger.LogInformation(ex, "Duplicate Facebook fanpage mapping prevented for source {SourceKey}", sourceKey);
+            _logger.LogInformation(ex, "Duplicate Facebook feed mapping prevented for source {SourceKey}", sourceKey);
             await ReplyAsync($"{sourceKey} is already tracked in {channel.Mention}.");
             return;
         }
@@ -173,7 +167,7 @@ public sealed class FacebookFeedModule(
         await ReplyAsync($"Added Facebook {sourceTypeLabel} {sourceKey} to {channel.Mention} via {selectedProvider}.");
     }
 
-    [SlashCommand("list-fb", "List tracked Facebook fanpage feeds in this guild")]
+    [SlashCommand("list-fb", "List tracked Facebook feeds in this guild")]
     public async Task ListFacebookAsync()
     {
         if (!TryValidateGuildContext(out _))
@@ -194,7 +188,7 @@ public sealed class FacebookFeedModule(
 
         if (feeds.Count == 0)
         {
-            await ReplyAsync("No Facebook fanpage feeds are currently tracked in this guild.");
+            await ReplyAsync("No Facebook feeds are currently tracked in this guild.");
             return;
         }
 
@@ -218,7 +212,7 @@ public sealed class FacebookFeedModule(
         await ReplyAsync(string.Empty, embed);
     }
 
-    [SlashCommand("remove-fb", "Remove tracked Facebook fanpage feed mapping")]
+    [SlashCommand("remove-fb", "Remove tracked Facebook feed mapping")]
     public async Task RemoveFacebookAsync(string fanpageOrId, ITextChannel? channel = null)
     {
         if (!TryValidateGuildContext(out var guildUser))
@@ -236,7 +230,7 @@ public sealed class FacebookFeedModule(
         var sourceKey = NormalizeFanpageSource(fanpageOrId);
         if (string.IsNullOrWhiteSpace(sourceKey))
         {
-            await ReplyAsync("Invalid Facebook fanpage handle/id.");
+            await ReplyAsync("Invalid Facebook source handle/id.");
             return;
         }
 
@@ -290,7 +284,7 @@ public sealed class FacebookFeedModule(
         };
     }
 
-    private async Task<FeedValidationResult> ValidateRssAsync(string rssUrl, FeedProvider provider)
+    private async Task<FeedValidationResult> ValidateRssAsync(string rssUrl, FeedProvider provider, FacebookSourceType sourceType)
     {
         var maxRetries = Math.Max(0, _retryOptions.Value.MaxRetries);
         var initialDelaySeconds = Math.Max(1, _retryOptions.Value.InitialDelaySeconds);
@@ -313,6 +307,14 @@ public sealed class FacebookFeedModule(
 
                     if (LooksLikeErrorPayload(body))
                     {
+                        if (provider == FeedProvider.RssBridge && sourceType == FacebookSourceType.Profile)
+                        {
+                            _logger.LogWarning(
+                                "RSS validation received bridge error payload for Facebook profile URL {RssUrl}. Allowing registration so runtime fallback can recover.",
+                                rssUrl);
+                            return FeedValidationResult.Valid();
+                        }
+
                         return FeedValidationResult.Invalid(
                             "Feed response contains parser error markers.",
                             preferAddLink: true);
@@ -320,6 +322,14 @@ public sealed class FacebookFeedModule(
 
                     if (provider == FeedProvider.RssBridge && !HasUsableFeedItems(body))
                     {
+                        if (sourceType == FacebookSourceType.Profile)
+                        {
+                            _logger.LogWarning(
+                                "RSS-Bridge profile validation returned no usable items for {RssUrl}. Allowing registration due to profile variability.",
+                                rssUrl);
+                            return FeedValidationResult.Valid();
+                        }
+
                         return FeedValidationResult.Invalid(
                             "RSS-Bridge response has no usable items for this source.",
                             preferAddLink: true);

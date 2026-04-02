@@ -24,7 +24,7 @@
 - Run `scripts/integration-evidence.ps1` after real `/add-fb` and `/add-link` setup to verify DB + publish evidence
 - For profile sources, verify `/add-fb` uses numeric ID with `sourceType=profile` and evidence script uses `-FacebookSourceType profile`
 - If profile alerts are enabled, verify `FEEDPROVIDERS__FACEBOOKPROFILEALERTCHANNELID` points to an admin-only channel
-- If RSS-Bridge priority fallback is enabled, verify `RSSBRIDGEFALLBACK__ENABLEFORPROFILE=false` unless profile support has been explicitly implemented for RSS-Bridge routes
+- If RSS-Bridge priority fallback is enabled for profiles, monitor profile error-only rate during canary and tune thresholds before broad rollout
 - If Apify fallback is enabled, verify `APIFYFALLBACK__APITOKEN` is set and monitor fallback call frequency against budget
 
 ## Deployment Artifacts

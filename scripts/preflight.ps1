@@ -163,7 +163,7 @@ if ($enableRssBridgeFallback) {
     }
 
     if ($enableRssBridgeFallbackForProfile) {
-        Info "RSSBRIDGEFALLBACK__ENABLEFORPROFILE=true while current resolver does not support Facebook profile via RSS-Bridge"
+        Info "RSSBRIDGEFALLBACK__ENABLEFORPROFILE=true (profile path enabled). Run canary monitoring for profile error-only rates."
     }
 }
 

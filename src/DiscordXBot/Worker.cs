@@ -329,6 +329,10 @@ public class Worker : BackgroundService
         state.ConsecutivePrimaryFailures++;
 
         var threshold = Math.Max(1, options.FailureThreshold);
+        if (sampleFeed.SourceType == FacebookSourceType.Profile && primaryResult.Outcome == FeedFetchOutcome.ErrorOnly)
+        {
+            threshold = 1;
+        }
         if (state.ConsecutivePrimaryFailures < threshold)
         {
             return primaryResult;
