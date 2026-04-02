@@ -1,354 +1,393 @@
-# Discord Feed Bot (X + Facebook)
+# ---
 
-Bot Discord tu dong lay feed tu X/Facebook va dang vao channel theo lich polling.
+**Discord Feed Bot (X \+ Facebook)**
 
-Tai lieu nay la huong dan end-to-end tu setup den deploy va van hanh hang ngay.
+Bot Discord tự động lấy feed từ X/Facebook và đăng vào channel theo lịch polling.
 
-## 1. Tong quan nhanh
+Tài liệu này là hướng dẫn end-to-end từ setup đến deploy và vận hành hằng ngày.
 
-Bot ho tro 3 nhom feed:
-- X account feed (`/add-x`)
-- Facebook feed fanpage/profile (`/add-fb`)
-- Direct RSS feed (`/add-link`)
+## **1\. Tổng quan nhanh**
 
-Bot co fallback runtime cho Facebook:
-- Primary provider (theo feed da dang ky)
-- RSS-Bridge fallback (uu tien truoc)
-- Apify fallback (layer cuoi)
+Bot hỗ trợ 3 nhóm feed:
 
-Script van hanh da co san:
-- `scripts/preflight.ps1`
-- `scripts/apply-migrations.ps1`
-- `scripts/smoke-test.ps1`
-- `scripts/integration-evidence.ps1`
-- `scripts/precheck-fanpages.ps1`
+* X account feed (/add-x)  
+* Facebook feed fanpage/profile (/add-fb)  
+* Direct RSS feed (/add-link)
 
-Tai lieu chi tiet bo sung:
-- `docs/DEPLOYMENT.md`
-- `docs/ENV-MATRIX.md`
-- `docs/ops-checklist.md`
+Bot có fallback runtime cho Facebook:
 
-## 2. Kien truc
+* **Primary provider**: (Theo feed đã đăng ký)  
+* **RSS-Bridge fallback**: (Ưu tiên trước)  
+* **Apify fallback**: (Layer cuối)
 
-Service chinh trong `docker-compose.yml`:
-- `db`: PostgreSQL
-- `rss-bridge`: RSS bridge provider
-- `rsshub`: RSSHub provider
-- `redis`: cache cho RSSHub
-- `bot`: .NET worker + Discord gateway
+Script vận hành đã có sẵn:
 
-Code chinh:
-- `src/DiscordXBot/Worker.cs`: polling/fetch/fallback/publish
-- `src/DiscordXBot/Discord/Commands/*.cs`: slash command handlers
-- `src/DiscordXBot/Services/*.cs`: resolver, RSS clients, publisher, parser
+* scripts/preflight.ps1  
+* scripts/apply-migrations.ps1  
+* scripts/smoke-test.ps1  
+* scripts/integration-evidence.ps1  
+* scripts/precheck-fanpages.ps1
 
-## 3. Yeu cau moi truong
+Tài liệu chi tiết bổ sung:
 
-Can co:
-1. Windows + PowerShell (5.1 hoac 7+)
-2. Docker Desktop (WSL2 enabled)
-3. .NET SDK 8 (neu chay source-run)
-4. Discord bot token va quyen bot phu hop
+* docs/DEPLOYMENT.md  
+* docs/ENV-MATRIX.md  
+* docs/ops-checklist.md
 
-## 4. Setup Discord Bot (mot lan)
+## **2\. Kiến trúc**
 
-1. Tao app tai Discord Developer Portal.
-2. Tao bot user va copy token.
-3. Bat quyen bot can thiet trong guild:
-- View Channels
-- Send Messages
-- Embed Links
-- Read Message History
-4. Invite bot vao server voi scope:
-- `bot`
-- `applications.commands`
+Service chính trong docker-compose.yml:
 
-## 5. Khoi tao local bang Docker (khuyen nghi)
+* db: PostgreSQL  
+* rss-bridge: RSS bridge provider  
+* rsshub: RSSHub provider  
+* redis: Cache cho RSSHub  
+* bot: .NET worker \+ Discord gateway
 
-### 5.1 Tao file env
+Code chính:
 
-```powershell
+* src/DiscordXBot/Worker.cs: Polling/fetch/fallback/publish  
+* src/DiscordXBot/Discord/Commands/\*.cs: Slash command handlers  
+* src/DiscordXBot/Services/\*.cs: Resolver, RSS clients, publisher, parser
+
+## **3\. Yêu cầu môi trường**
+
+Cần có:
+
+1. Windows \+ PowerShell (5.1 hoặc 7+)  
+2. Docker Desktop (WSL2 enabled)  
+3. .NET SDK 8 (Nếu chạy source-run)  
+4. Discord bot token và quyền bot phù hợp
+
+## **4\. Setup Discord Bot (Một lần)**
+
+1. Tạo app tại **Discord Developer Portal**.  
+2. Tạo bot user và copy token.  
+3. Bật quyền bot cần thiết trong guild:  
+   * View Channels  
+   * Send Messages  
+   * Embed Links  
+   * Read Message History  
+4. Invite bot vào server với scope:  
+   * bot  
+   * applications.commands
+
+## **5\. Khởi tạo local bằng Docker (Khuyến nghị)**
+
+### **5.1 Tạo file env**
+
+PowerShell
+
 Copy-Item .env.prod.example .env
-```
 
-Cap nhat toi thieu:
-- `DISCORD_TOKEN`
-- `POSTGRES_PASSWORD`
+Cập nhật tối thiểu:
 
-Khuyen nghi cap nhat them:
-- `DISCORD_GUILD_ID`
-- `FEEDPROVIDERS__DEFAULTFACEBOOKPROVIDER`
-- `APIFYFALLBACK__ENABLED`
-- `RSSBRIDGEFALLBACK__ENABLED`
-- `RSSBRIDGEFALLBACK__ENABLEFORPROFILE`
+* DISCORD\_TOKEN  
+* POSTGRES\_PASSWORD
 
-Luu y:
-- Khong commit `.env`.
-- Chi commit cac file `.env.*.example`.
+Khuyến nghị cập nhật thêm:
 
-### 5.2 Preflight
+* DISCORD\_GUILD\_ID  
+* FEEDPROVIDERS\_\_DEFAULTFACEBOOKPROVIDER  
+* APIFYFALLBACK\_\_ENABLED  
+* RSSBRIDGEFALLBACK\_\_ENABLED  
+* RSSBRIDGEFALLBACK\_\_ENABLEFORPROFILE
 
-```powershell
-.\scripts\preflight.ps1 -EnvFile .env
-```
+**Lưu ý:**
 
-Preflight kiem tra:
-- Docker/Compose
-- Bien bat buoc
-- Tinh hop le compose profile `prod`
+* Không commit .env.  
+* Chỉ commit các file .env.\*.example.
 
-### 5.3 Apply migration
+### **5.2 Preflight**
 
-```powershell
-.\scripts\apply-migrations.ps1 -Mode docker
-```
+PowerShell
 
-Script se backup DB vao `backups/` tru khi dung `-SkipBackup`.
+.\\scripts\\preflight.ps1 \-EnvFile .env
 
-### 5.4 Deploy
+Preflight kiểm tra:
 
-```powershell
-docker compose --profile prod up -d --build
-docker compose --profile prod ps
-```
+* Docker/Compose  
+* Biến bắt buộc  
+* Tính hợp lệ của compose profile prod
 
-### 5.5 Smoke test
+### **5.3 Apply migration**
 
-```powershell
-.\scripts\smoke-test.ps1 -ComposeMode prod
-```
+PowerShell
 
-Neu bot vua restart va ban can nhieu log hon:
+.\\scripts\\apply\-migrations.ps1 \-Mode docker
 
-```powershell
-.\scripts\smoke-test.ps1 -ComposeMode prod -BotLogSinceMinutes 240
-```
+Script sẽ backup DB vào backups/ trừ khi dùng \-SkipBackup.
 
-## 6. Chay source-run (khong full docker)
+### **5.4 Deploy**
 
-Dung khi ban muon debug nhanh code:
+PowerShell
 
-```powershell
+docker compose \-\-profile prod up \-d \-\-build  
+docker compose \-\-profile prod ps
+
+### **5.5 Smoke test**
+
+PowerShell
+
+.\\scripts\\smoke\-test.ps1 \-ComposeMode prod
+
+Nếu bot vừa restart và bạn cần nhiều log hơn:
+
+PowerShell
+
+.\\scripts\\smoke\-test.ps1 \-ComposeMode prod \-BotLogSinceMinutes 240
+
+## **6\. Chạy source-run (Không dùng Docker đầy đủ)**
+
+Dùng khi bạn muốn debug nhanh code:
+
+PowerShell
+
 Copy-Item .env.supabase.example .env
-```
 
-Cap nhat toi thieu:
-- `DISCORD_TOKEN`
-- `CONNECTIONSTRINGS__DEFAULT`
-- `RSSBRIDGE__BASEURL`
+Cập nhật tối thiểu:
 
-Khoi dong dependency can thiet:
+* DISCORD\_TOKEN  
+* CONNECTIONSTRINGS\_\_DEFAULT  
+* RSSBRIDGE\_\_BASEURL
 
-```powershell
-docker compose up -d db rss-bridge
-```
+Khởi động dependency cần thiết:
 
-Chay bot:
+PowerShell
 
-```powershell
-dotnet run --project src/DiscordXBot/DiscordXBot.csproj
-```
+docker compose up \-d db rss\-bridge
 
-## 7. Slash commands va cach dung cu the
+Chạy bot:
 
-Tat ca lenh can chay trong guild va user can co quyen Manage Server hoac Manage Channels.
+PowerShell
 
-### 7.1 X feeds
+dotnet run \-\-project src/DiscordXBot/DiscordXBot.csproj
 
-Them:
-```text
-/add-x username:<x_username> channel:<#channel>
-```
+## **7\. Slash commands và cách dùng cụ thể**
 
-Liet ke:
-```text
+Tất cả lệnh cần chạy trong guild và user cần có quyền **Manage Server** hoặc **Manage Channels**.
+
+### **7.1 X feeds**
+
+Thêm:
+
+Plaintext
+
+/add-x username:\<x\_username\> channel:\<\#channel\>
+
+Liệt kê:
+
+Plaintext
+
 /list-x
-```
 
-Xoa:
-```text
-/remove-x username:<x_username> [channel:<#channel>]
-```
+Xóa:
 
-### 7.2 Facebook feeds (fanpage/profile)
+Plaintext
 
-Them fanpage:
-```text
-/add-fb fanpageOrId:100072247413815 channel:<#channel> sourceType:fanpage provider:rssbridge
-```
+/remove-x username:\<x\_username\> \[channel:\<\#channel\>\]
 
-Them profile:
-```text
-/add-fb fanpageOrId:100057435399770 channel:<#channel> sourceType:profile provider:rsshub
-```
+### **7.2 Facebook feeds (fanpage/profile)**
 
-Hoac profile voi RSS-Bridge:
-```text
-/add-fb fanpageOrId:100057435399770 channel:<#channel> sourceType:profile provider:rssbridge
-```
+Thêm fanpage:
 
-Liet ke:
-```text
+Plaintext
+
+/add-fb fanpageOrId:000000000000000 channel:\<\#channel\> sourceType:fanpage provider:rssbridge
+
+Thêm profile:
+
+Plaintext
+
+/add-fb fanpageOrId:000000000000000 channel:\<\#channel\> sourceType:profile provider:rsshub
+
+Hoặc profile với RSS-Bridge:
+
+Plaintext
+
+/add-fb fanpageOrId:000000000000000 channel:\<\#channel\> sourceType:profile provider:rssbridge
+
+Liệt kê:
+
+Plaintext
+
 /list-fb
-```
 
-Xoa:
-```text
-/remove-fb fanpageOrId:100057435399770 [channel:<#channel>]
-```
+Xóa:
 
-Luu y quan trong:
-- Profile hien tai uu tien ID so (`sourceType=profile`).
-- Neu provider tra loi tam thoi (503/timeout/network), bot van cho add feed va tra warning.
-- Runtime se xu ly tiep bang retry/fallback chain.
+Plaintext
 
-### 7.3 Direct RSS feeds
+/remove-fb fanpageOrId:000000000000000 \[channel:\<\#channel\>\]
 
-Them:
-```text
-/add-link rssUrl:https://example.com/feed.xml platform:FB channel:<#channel>
-```
+**Lưu ý quan trọng:**
 
-Liet ke:
-```text
+* Profile hiện tại ưu tiên ID số (sourceType=profile).  
+* Nếu provider trả lời tạm thời (503/timeout/network), bot vẫn cho add feed và trả về cảnh báo (warning).  
+* Runtime sẽ xử lý tiếp bằng retry/fallback chain.
+
+### **7.3 Direct RSS feeds**
+
+Thêm:
+
+Plaintext
+
+/add-link rssUrl:https://example.com/feed.xml platform:FB channel:\<\#channel\>
+
+Liệt kê:
+
+Plaintext
+
 /list-links
-```
 
-Xoa:
-```text
-/remove-link rssUrl:https://example.com/feed.xml [channel:<#channel>]
-```
+Xóa:
 
-## 8. Cau hinh fallback khuyen nghi
+Plaintext
 
-### 8.1 Apify fallback
+/remove-link rssUrl:https://example.com/feed.xml \[channel:\<\#channel\>\]
 
-Can bat:
-- `APIFYFALLBACK__ENABLED=true`
-- `APIFYFALLBACK__APITOKEN=...`
-- `APIFYFALLBACK__ACTORID=apify/facebook-posts-scraper`
+## **8\. Cấu hình fallback khuyến nghị**
 
-Khuyen nghi:
-- `APIFYFALLBACK__FAILURETHRESHOLD=3`
-- `APIFYFALLBACK__COOLDOWNMINUTES=180`
+### **8.1 Apify fallback**
 
-### 8.2 RSS-Bridge priority fallback
+Cần bật:
 
-Can bat:
-- `RSSBRIDGEFALLBACK__ENABLED=true`
+* APIFYFALLBACK\_\_ENABLED=true  
+* APIFYFALLBACK\_\_APITOKEN=...  
+* APIFYFALLBACK\_\_ACTORID=apify/facebook-posts-scraper
 
-Khuyen nghi:
-- `RSSBRIDGEFALLBACK__FAILURETHRESHOLD=2`
-- `RSSBRIDGEFALLBACK__COOLDOWNMINUTES=60`
-- `RSSBRIDGEFALLBACK__ENABLEFORFANPAGE=true`
-- `RSSBRIDGEFALLBACK__ENABLEFORPROFILE=true` (canary truoc, mo rong sau)
+Khuyến nghị:
 
-Thu tu runtime:
-1. Primary provider fetch
-2. RSS-Bridge fallback
+* APIFYFALLBACK\_\_FAILURETHRESHOLD=3  
+* APIFYFALLBACK\_\_COOLDOWNMINUTES=180
+
+### **8.2 RSS-Bridge priority fallback**
+
+Cần bật:
+
+* RSSBRIDGEFALLBACK\_\_ENABLED=true
+
+Khuyến nghị:
+
+* RSSBRIDGEFALLBACK\_\_FAILURETHRESHOLD=2  
+* RSSBRIDGEFALLBACK\_\_COOLDOWNMINUTES=60  
+* RSSBRIDGEFALLBACK\_\_ENABLEFORFANPAGE=true  
+* RSSBRIDGEFALLBACK\_\_ENABLEFORPROFILE=true (Canary trước, mở rộng sau)
+
+Thứ tự runtime:
+
+1. Primary provider fetch  
+2. RSS-Bridge fallback  
 3. Apify fallback
 
-## 9. Quy trinh verify sau khi add feed
+## **9\. Quy trình verify sau khi add feed**
 
-1. Chay command tren Discord.
-2. Kiem tra da co mapping:
-```powershell
-.\scripts\integration-evidence.ps1 -ComposeMode prod -FanpageSource 100057435399770 -FacebookSourceType profile -LookbackMinutes 360
-```
-3. Theo doi log:
-```powershell
-docker compose --profile prod logs -f bot
-```
-4. Tim marker quan trong:
-- `Using RSS-Bridge fallback for source ...`
-- `Using Apify fallback for source ...`
-- `Published tweet ...`
-- `Polling cycle done ...`
+1. Chạy command trên Discord.  
+2. Kiểm tra xem đã có mapping chưa:
 
-## 10. Van hanh hang ngay
+PowerShell
 
-### 10.1 Lenh log nhanh
+.\\scripts\\integration\-evidence.ps1 \-ComposeMode prod \-FanpageSource 100057435399770 \-FacebookSourceType profile \-LookbackMinutes 360
 
-```powershell
-docker compose --profile prod logs -f bot
-docker compose --profile prod logs -f rss-bridge
-docker compose --profile prod logs -f rsshub
-docker compose --profile prod logs -f db
-```
+3. Theo dõi log:
 
-### 10.2 Kiem tra suc khoe batch Facebook truoc onboarding
+PowerShell
 
-```powershell
-.\scripts\precheck-fanpages.ps1 -FanpageSources 10150123547145211,100071458686024
-```
+docker compose \-\-profile prod logs \-f bot
 
-### 10.3 Checklist release
+4. Tìm các marker quan trọng:  
+* Using RSS-Bridge fallback for source ...  
+* Using Apify fallback for source ...  
+* Published tweet ...  
+* Polling cycle done ...
 
-```powershell
-.\scripts\preflight.ps1 -EnvFile .env
-.\scripts\apply-migrations.ps1 -Mode docker
-docker compose --profile prod up -d --build
-.\scripts\smoke-test.ps1 -ComposeMode prod
-```
+## **10\. Vận hành hằng ngày**
 
-## 11. Troubleshooting nhanh
+### **10.1 Lệnh log nhanh**
 
-### 11.1 `/add-fb` bao HTTP 503
+PowerShell
 
-Trang thai moi:
-- Command co the van add duoc feed neu loi la tam thoi (5xx/timeout/network).
-- Neu van fail, thu:
-1. Kiem tra provider dang dung (`rsshub`/`rssbridge`).
-2. Kiem tra service:
-```powershell
-docker compose --profile prod ps
-docker compose --profile prod logs --since 10m rsshub
-docker compose --profile prod logs --since 10m rss-bridge
-```
-3. Dung `precheck-fanpages.ps1` de phan loai source.
+docker compose \-\-profile prod logs \-f bot  
+docker compose \-\-profile prod logs \-f rss\-bridge  
+docker compose \-\-profile prod logs \-f rsshub  
+docker compose \-\-profile prod logs \-f db
 
-### 11.2 Khong thay slash command
+### **10.2 Kiểm tra sức khỏe batch Facebook trước onboarding**
 
-1. Kiem tra `DISCORD_GUILD_ID`.
-2. Kiem tra log `Registered slash command set (...)`.
+PowerShell
+
+.\\scripts\\precheck\-fanpages.ps1 \-FanpageSources 10150123547145211,100071458686024
+
+### **10.3 Checklist release**
+
+PowerShell
+
+.\\scripts\\preflight.ps1 \-EnvFile .env  
+.\\scripts\\apply\-migrations.ps1 \-Mode docker  
+docker compose \-\-profile prod up \-d \-\-build  
+.\\scripts\\smoke\-test.ps1 \-ComposeMode prod
+
+## **11\. Troubleshooting nhanh**
+
+### **11.1 /add-fb báo HTTP 503**
+
+Trạng thái mới:
+
+* Command có thể vẫn add được feed nếu lỗi là tạm thời (5xx/timeout/network).  
+* Nếu vẫn fail, thử:  
+  1. Kiểm tra provider đang dùng (rsshub/rssbridge).  
+  2. Kiểm tra service:
+
+  PowerShell  
+     docker compose \-\-profile prod ps  
+     docker compose \-\-profile prod logs \-\-since 10m rsshub  
+     docker compose \-\-profile prod logs \-\-since 10m rss\-bridge
+
+  3. Dùng precheck-fanpages.ps1 để phân loại source.
+
+### **11.2 Không thấy slash command**
+
+1. Kiểm tra DISCORD\_GUILD\_ID.  
+2. Kiểm tra log Registered slash command set (...).  
 3. Restart bot:
-```powershell
-docker compose --profile prod restart bot
-```
 
-### 11.3 Bot khong publish du co feed
+PowerShell
 
-1. Kiem tra `processed_tweets` co duplicate khong.
-2. Kiem tra media policy va parser output.
-3. Kiem tra fallback marker trong log.
+docker compose \-\-profile prod restart bot
 
-## 12. Bao mat
+### **11.3 Bot không publish dù có feed**
 
-1. Khong commit cac gia tri secret (`DISCORD_TOKEN`, `APIFY token`, `FB_COOKIE`, DB password).
-2. Neu lo secret, rotate ngay.
-3. Uu tien dung secret manager cho production thuc te.
+1. Kiểm tra processed\_tweets có bị trùng (duplicate) không.  
+2. Kiểm tra media policy và parser output.  
+3. Kiểm tra fallback marker trong log.
 
-## 13. Rollback
+## **12\. Bảo mật**
 
-```powershell
-docker compose --profile prod down
-git checkout <last_known_good_commit>
-docker compose --profile prod up -d --build
-```
+1. Không commit các giá trị bí mật (DISCORD\_TOKEN, APIFY token, FB\_COOKIE, DB password).  
+2. Nếu lộ secret, phải rotate (đổi mới) ngay lập tức.  
+3. Ưu tiên dùng secret manager cho môi trường production thực tế.
 
-## 14. File tham chieu chinh
+## **13\. Rollback**
 
-- `docs/DEPLOYMENT.md`
-- `docs/ENV-MATRIX.md`
-- `docs/ops-checklist.md`
-- `scripts/preflight.ps1`
-- `scripts/smoke-test.ps1`
-- `scripts/integration-evidence.ps1`
-- `scripts/precheck-fanpages.ps1`
+PowerShell
+
+docker compose \-\-profile prod down  
+git checkout \<last\_known\_good\_commit\>  
+docker compose \-\-profile prod up \-d \-\-build
+
+## **14\. File tham chiếu chính**
+
+* docs/DEPLOYMENT.md  
+* docs/ENV-MATRIX.md  
+* docs/ops-checklist.md  
+* scripts/preflight.ps1  
+* scripts/smoke-test.ps1  
+* scripts/integration-evidence.ps1  
+* scripts/precheck-fanpages.ps1
 
 ---
 
-Neu can, buoc tiep theo nen tao them:
-1. `README-OPERATIONS.md` cho on-call/incident.
-2. `README-COMMANDS.md` gom screenshot slash command.
-3. `README-ARCHITECTURE.md` cho luong du lieu va fallback diagram.
+Nếu cần, bước tiếp theo bạn nên tạo thêm:
+
+1. README-OPERATIONS.md: Cho on-call/incident.  
+2. README-COMMANDS.md: Gồm screenshot các slash command thực tế.  
+3. README-ARCHITECTURE.md: Cho luồng dữ liệu và fallback diagram.
