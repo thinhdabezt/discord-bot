@@ -42,6 +42,11 @@ This matrix documents which variables are required for each deployment mode.
 | APIFYFALLBACK__COOLDOWNMINUTES | Optional | Optional | 180 | 180 | Minimum minutes between fallback attempts per source. |
 | APIFYFALLBACK__ENABLEFORFANPAGE | Optional | Optional | true | true | Enables Apify fallback for Facebook fanpage sources. |
 | APIFYFALLBACK__ENABLEFORPROFILE | Optional | Optional | true | true | Enables Apify fallback for Facebook profile sources. |
+| RSSBRIDGEFALLBACK__ENABLED | Optional | Optional | false | true | Enables RSS-Bridge priority fallback before Apify for Facebook sources. |
+| RSSBRIDGEFALLBACK__FAILURETHRESHOLD | Optional | Optional | 2 | 2 | Consecutive primary failures required before attempting RSS-Bridge fallback. |
+| RSSBRIDGEFALLBACK__COOLDOWNMINUTES | Optional | Optional | 60 | 60 | Minimum minutes between RSS-Bridge fallback attempts per source. |
+| RSSBRIDGEFALLBACK__ENABLEFORFANPAGE | Optional | Optional | true | true | Enables RSS-Bridge fallback for Facebook fanpage sources. |
+| RSSBRIDGEFALLBACK__ENABLEFORPROFILE | Optional | Optional | false | false | Keep false with current resolver because RSS-Bridge profile route is unsupported. |
 | POLLING__INTERVALMINUTES | Optional | Optional | 10 | 10 | Polling interval in minutes. |
 | POLLING__MAXITEMSPERFEED | Optional | Optional | 5 | 5 | Max feed items fetched each cycle. |
 | RETRY__MAXRETRIES | Optional | Optional | 3 | 3 | Retry count for RSS fetch path. |

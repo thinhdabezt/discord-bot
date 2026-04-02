@@ -30,6 +30,10 @@ builder.Services
 	.Bind(builder.Configuration.GetSection(ApifyFallbackOptions.SectionName));
 
 builder.Services
+	.AddOptions<RssBridgeFallbackOptions>()
+	.Bind(builder.Configuration.GetSection(RssBridgeFallbackOptions.SectionName));
+
+builder.Services
 	.AddOptions<PollingOptions>()
 	.Bind(builder.Configuration.GetSection(PollingOptions.SectionName));
 

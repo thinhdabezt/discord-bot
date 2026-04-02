@@ -96,6 +96,11 @@ if ($envMap.ContainsKey("APIFYFALLBACK__ENABLED")) {
     $enableApifyFallback = $envMap["APIFYFALLBACK__ENABLED"].ToLowerInvariant() -eq "true"
 }
 
+$enableRssBridgeFallback = $false
+if ($envMap.ContainsKey("RSSBRIDGEFALLBACK__ENABLED")) {
+    $enableRssBridgeFallback = $envMap["RSSBRIDGEFALLBACK__ENABLED"].ToLowerInvariant() -eq "true"
+}
+
 if ($enableRssHub) {
     if ($envMap.ContainsKey("FEEDPROVIDERS__RSSHUBBASEURL") -and -not [string]::IsNullOrWhiteSpace($envMap["FEEDPROVIDERS__RSSHUBBASEURL"])) {
         Pass "RSSHub enabled and FEEDPROVIDERS__RSSHUBBASEURL is set"
@@ -146,6 +151,19 @@ if ($enableApifyFallback) {
     }
     else {
         Fail "Apify fallback enabled but APIFYFALLBACK__ACTORID is missing"
+    }
+}
+
+if ($enableRssBridgeFallback) {
+    Info "RSS-Bridge priority fallback is enabled"
+
+    $enableRssBridgeFallbackForProfile = $false
+    if ($envMap.ContainsKey("RSSBRIDGEFALLBACK__ENABLEFORPROFILE")) {
+        $enableRssBridgeFallbackForProfile = $envMap["RSSBRIDGEFALLBACK__ENABLEFORPROFILE"].ToLowerInvariant() -eq "true"
+    }
+
+    if ($enableRssBridgeFallbackForProfile) {
+        Info "RSSBRIDGEFALLBACK__ENABLEFORPROFILE=true while current resolver does not support Facebook profile via RSS-Bridge"
     }
 }
 

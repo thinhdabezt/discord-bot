@@ -18,13 +18,16 @@ public class Worker : BackgroundService
     private readonly IOptionsMonitor<RetryOptions> _retryOptions;
     private readonly IOptionsMonitor<PublishOptions> _publishOptions;
     private readonly IOptionsMonitor<FeedProviderOptions> _feedProviderOptions;
+    private readonly IOptionsMonitor<RssBridgeFallbackOptions> _rssBridgeFallbackOptions;
     private readonly IOptionsMonitor<ApifyFallbackOptions> _apifyFallbackOptions;
     private readonly RssBridgeClient _rssBridgeClient;
+    private readonly FeedUrlResolver _feedUrlResolver;
     private readonly ApifyFacebookClient _apifyFacebookClient;
     private readonly TweetContentParser _tweetContentParser;
     private readonly DiscordPublisher _discordPublisher;
     private readonly ConcurrentDictionary<string, ProfileFetchHealthState> _profileFetchHealth = new(StringComparer.OrdinalIgnoreCase);
-    private readonly ConcurrentDictionary<string, FacebookFallbackState> _facebookFallbackState = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, FacebookFallbackState> _rssBridgeFallbackState = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, FacebookFallbackState> _apifyFallbackState = new(StringComparer.OrdinalIgnoreCase);
 
     public Worker(
         ILogger<Worker> logger,
@@ -33,7 +36,9 @@ public class Worker : BackgroundService
         IOptionsMonitor<RetryOptions> retryOptions,
         IOptionsMonitor<PublishOptions> publishOptions,
         IOptionsMonitor<FeedProviderOptions> feedProviderOptions,
+        IOptionsMonitor<RssBridgeFallbackOptions> rssBridgeFallbackOptions,
         RssBridgeClient rssBridgeClient,
+        FeedUrlResolver feedUrlResolver,
         IOptionsMonitor<ApifyFallbackOptions> apifyFallbackOptions,
         ApifyFacebookClient apifyFacebookClient,
         TweetContentParser tweetContentParser,
@@ -45,8 +50,10 @@ public class Worker : BackgroundService
         _retryOptions = retryOptions;
         _publishOptions = publishOptions;
         _feedProviderOptions = feedProviderOptions;
+        _rssBridgeFallbackOptions = rssBridgeFallbackOptions;
         _apifyFallbackOptions = apifyFallbackOptions;
         _rssBridgeClient = rssBridgeClient;
+        _feedUrlResolver = feedUrlResolver;
         _apifyFacebookClient = apifyFacebookClient;
         _tweetContentParser = tweetContentParser;
         _discordPublisher = discordPublisher;
@@ -118,9 +125,15 @@ public class Worker : BackgroundService
                     _pollingOptions.CurrentValue.MaxItemsPerFeed,
                     cancellationToken);
 
-                effectiveFetchResult = await TryApplyFacebookFallbackAsync(
+                var rssBridgeFallbackResult = await TryApplyFacebookRssBridgeFallbackAsync(
                     sampleFeed,
                     fetchResult,
+                    _pollingOptions.CurrentValue.MaxItemsPerFeed,
+                    cancellationToken);
+
+                effectiveFetchResult = await TryApplyFacebookApifyFallbackAsync(
+                    sampleFeed,
+                    rssBridgeFallbackResult,
                     _pollingOptions.CurrentValue.MaxItemsPerFeed,
                     cancellationToken);
 
@@ -271,7 +284,7 @@ public class Worker : BackgroundService
         return FeedFetchResult.NetworkError("Fetch retry budget exhausted.");
     }
 
-    private async Task<FeedFetchResult> TryApplyFacebookFallbackAsync(
+    private async Task<FeedFetchResult> TryApplyFacebookRssBridgeFallbackAsync(
         TrackedFeed sampleFeed,
         FeedFetchResult primaryResult,
         int maxItems,
@@ -282,8 +295,126 @@ public class Worker : BackgroundService
             return primaryResult;
         }
 
-        var stateKey = GetFacebookFallbackStateKey(sampleFeed);
-        var state = _facebookFallbackState.GetOrAdd(stateKey, _ => new FacebookFallbackState());
+        var stateKey = GetRssBridgeFallbackStateKey(sampleFeed);
+        var state = _rssBridgeFallbackState.GetOrAdd(stateKey, _ => new FacebookFallbackState());
+
+        if (primaryResult.Outcome == FeedFetchOutcome.Success && primaryResult.Posts.Count > 0)
+        {
+            state.ConsecutivePrimaryFailures = 0;
+            return primaryResult;
+        }
+
+        if (!ShouldConsiderFallbackOutcome(primaryResult.Outcome))
+        {
+            return primaryResult;
+        }
+
+        var options = _rssBridgeFallbackOptions.CurrentValue;
+        if (!options.Enabled)
+        {
+            return primaryResult;
+        }
+
+        if ((sampleFeed.SourceType == FacebookSourceType.Fanpage && !options.EnableForFanpage) ||
+            (sampleFeed.SourceType == FacebookSourceType.Profile && !options.EnableForProfile))
+        {
+            return primaryResult;
+        }
+
+        if (sampleFeed.Provider == FeedProvider.RssBridge)
+        {
+            return primaryResult;
+        }
+
+        state.ConsecutivePrimaryFailures++;
+
+        var threshold = Math.Max(1, options.FailureThreshold);
+        if (state.ConsecutivePrimaryFailures < threshold)
+        {
+            return primaryResult;
+        }
+
+        var cooldownMinutes = Math.Max(5, options.CooldownMinutes);
+        var utcNow = DateTime.UtcNow;
+        if (state.LastFallbackAttemptUtc != default &&
+            utcNow - state.LastFallbackAttemptUtc < TimeSpan.FromMinutes(cooldownMinutes))
+        {
+            return primaryResult;
+        }
+
+        string fallbackUrl;
+        try
+        {
+            var source = string.IsNullOrWhiteSpace(sampleFeed.SourceKey)
+                ? sampleFeed.XUsername
+                : sampleFeed.SourceKey;
+
+            fallbackUrl = _feedUrlResolver.Resolve(
+                FeedPlatform.Facebook,
+                FeedProvider.RssBridge,
+                source,
+                sampleFeed.SourceType);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "RSS-Bridge fallback cannot resolve source {FeedLabel}.",
+                GetFeedLabel(sampleFeed));
+            return primaryResult;
+        }
+
+        var fallbackFeed = new TrackedFeed
+        {
+            Platform = FeedPlatform.Facebook,
+            SourceType = sampleFeed.SourceType,
+            SourceKey = sampleFeed.SourceKey,
+            XUsername = sampleFeed.XUsername,
+            Provider = FeedProvider.RssBridge,
+            RssUrl = fallbackUrl,
+            IsActive = sampleFeed.IsActive,
+            GuildId = sampleFeed.GuildId,
+            ChannelId = sampleFeed.ChannelId
+        };
+
+        state.LastFallbackAttemptUtc = utcNow;
+
+        var fallbackResult = await _rssBridgeClient.GetPostsDetailedAsync(fallbackFeed, maxItems, cancellationToken);
+        if (fallbackResult.Outcome == FeedFetchOutcome.Success && fallbackResult.Posts.Count > 0)
+        {
+            state.ConsecutivePrimaryFailures = 0;
+
+            _logger.LogInformation(
+                "Using RSS-Bridge fallback for source {FeedLabel}. PrimaryOutcome={PrimaryOutcome}, FallbackPosts={Count}",
+                GetFeedLabel(sampleFeed),
+                GetFetchOutcomeLabel(primaryResult.Outcome),
+                fallbackResult.Posts.Count);
+
+            return fallbackResult;
+        }
+
+        _logger.LogWarning(
+            "RSS-Bridge fallback returned no usable posts for source {FeedLabel}. PrimaryOutcome={PrimaryOutcome}, FallbackOutcome={FallbackOutcome}",
+            GetFeedLabel(sampleFeed),
+            GetFetchOutcomeLabel(primaryResult.Outcome),
+            GetFetchOutcomeLabel(fallbackResult.Outcome));
+
+        return primaryResult;
+    }
+
+    private async Task<FeedFetchResult> TryApplyFacebookApifyFallbackAsync(
+        TrackedFeed sampleFeed,
+        FeedFetchResult primaryResult,
+        int maxItems,
+        CancellationToken cancellationToken)
+    {
+        if (sampleFeed.Platform != FeedPlatform.Facebook)
+        {
+            return primaryResult;
+        }
+
+        var stateKey = GetApifyFallbackStateKey(sampleFeed);
+        var state = _apifyFallbackState.GetOrAdd(stateKey, _ => new FacebookFallbackState());
 
         if (primaryResult.Outcome == FeedFetchOutcome.Success && primaryResult.Posts.Count > 0)
         {
@@ -508,10 +639,16 @@ public class Worker : BackgroundService
         return $"{feed.Platform}:{feed.SourceType}:{source}";
     }
 
-    private static string GetFacebookFallbackStateKey(TrackedFeed feed)
+    private static string GetRssBridgeFallbackStateKey(TrackedFeed feed)
     {
         var source = GetSourceKey(feed);
-        return $"fb-fallback:{feed.SourceType}:{source}";
+        return $"fb-rssbridge-fallback:{feed.SourceType}:{source}";
+    }
+
+    private static string GetApifyFallbackStateKey(TrackedFeed feed)
+    {
+        var source = GetSourceKey(feed);
+        return $"fb-apify-fallback:{feed.SourceType}:{source}";
     }
 
     private async Task<(PublishResult Result, int RetryCount)> PublishWithRetryAsync(

@@ -177,6 +177,25 @@ Behavior:
 - Fallback is rate-limited per source by cooldown.
 - Fallback works for both fanpage and profile when corresponding `APIFYFALLBACK__ENABLEFOR*` flags are true.
 
+## RSS-Bridge Priority Fallback For Facebook
+To insert a lower-cost fallback layer before Apify, configure:
+- `RSSBRIDGEFALLBACK__ENABLED=true`
+- `RSSBRIDGEFALLBACK__FAILURETHRESHOLD=2`
+- `RSSBRIDGEFALLBACK__COOLDOWNMINUTES=60`
+
+Optional scope flags:
+- `RSSBRIDGEFALLBACK__ENABLEFORFANPAGE=true`
+- `RSSBRIDGEFALLBACK__ENABLEFORPROFILE=false`
+
+Runtime order:
+- Primary provider fetch (tracked feed provider)
+- RSS-Bridge fallback (if enabled and policy threshold/cooldown allows)
+- Apify fallback (if RSS-Bridge did not recover usable posts and Apify policy allows)
+
+Notes:
+- With current resolver rules, RSS-Bridge fallback is intended for fanpage sources.
+- Keep profile flag off unless RSS-Bridge profile route support is explicitly added.
+
 ## Logs and Diagnostics
 
 ```powershell
