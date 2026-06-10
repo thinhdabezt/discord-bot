@@ -22,18 +22,6 @@ public class FeedUrlResolverTests
     }
 
     [Fact]
-    public void Resolve_UsesRssHubForFacebook()
-    {
-        var resolver = CreateResolver(
-            new RssBridgeOptions(),
-            new FeedProviderOptions { RssHubBaseUrl = "http://rsshub:1200" });
-
-        var url = resolver.Resolve(FeedPlatform.Facebook, FeedProvider.RssHub, "nvidia");
-
-        Assert.Equal("http://rsshub:1200/facebook/page/nvidia", url);
-    }
-
-    [Fact]
     public void Resolve_UsesRssBridgeForFacebook()
     {
         var resolver = CreateResolver(
@@ -45,22 +33,6 @@ public class FeedUrlResolverTests
         Assert.Equal(
             "http://rss-bridge:80/?action=display&bridge=FacebookBridge&context=User&u=10150123547145211&media_type=all&format=Atom",
             url);
-    }
-
-    [Fact]
-    public void Resolve_UsesRssHubForFacebookProfile()
-    {
-        var resolver = CreateResolver(
-            new RssBridgeOptions(),
-            new FeedProviderOptions { RssHubBaseUrl = "http://rsshub:1200" });
-
-        var url = resolver.Resolve(
-            FeedPlatform.Facebook,
-            FeedProvider.RssHub,
-            "10001234567890",
-            FacebookSourceType.Profile);
-
-        Assert.Equal("http://rsshub:1200/facebook/user/10001234567890", url);
     }
 
     [Fact]
@@ -82,6 +54,77 @@ public class FeedUrlResolverTests
     }
 
     [Fact]
+    public void GetDefaultProvider_UsesRssBridgeForFacebook()
+    {
+        var resolver = CreateResolver(
+            new RssBridgeOptions { BaseUrl = "http://rss-bridge:80" },
+            new FeedProviderOptions());
+
+        var provider = resolver.GetDefaultProvider(FeedPlatform.Facebook);
+
+        Assert.Equal(FeedProvider.RssBridge, provider);
+    }
+
+#pragma warning disable CS0618
+    [Fact]
+    public void GetDefaultProvider_IgnoresLegacyRssHubFacebookConfig()
+    {
+        var resolver = CreateResolver(
+            new RssBridgeOptions { BaseUrl = "http://rss-bridge:80" },
+            new FeedProviderOptions { DefaultFacebookProvider = FeedProvider.RssHub });
+
+        var provider = resolver.GetDefaultProvider(FeedPlatform.Facebook);
+
+        Assert.Equal(FeedProvider.RssBridge, provider);
+    }
+#pragma warning restore CS0618
+
+    [Fact]
+    public void ResolveEffectiveFeedUrl_RefreshesFacebookRssBridgeUrlFromSourceKey()
+    {
+        var resolver = CreateResolver(
+            new RssBridgeOptions { BaseUrl = "http://rss-bridge:80" },
+            new FeedProviderOptions());
+
+        var feed = new TrackedFeed
+        {
+            Platform = FeedPlatform.Facebook,
+            Provider = FeedProvider.RssBridge,
+            SourceType = FacebookSourceType.Profile,
+            SourceKey = "61574718883158",
+            XUsername = "fb_61574718883158",
+            RssUrl = "http://rsshub:1200/facebook/user/61574718883158"
+        };
+
+        var url = resolver.ResolveEffectiveFeedUrl(feed);
+
+        Assert.Equal(
+            "http://rss-bridge:80/?action=display&bridge=FacebookBridge&context=User&u=61574718883158&media_type=all&format=Atom",
+            url);
+    }
+
+    [Fact]
+    public void ResolveEffectiveFeedUrl_KeepsDirectRssUrl()
+    {
+        var resolver = CreateResolver(
+            new RssBridgeOptions { BaseUrl = "http://rss-bridge:80" },
+            new FeedProviderOptions());
+
+        var feed = new TrackedFeed
+        {
+            Platform = FeedPlatform.Facebook,
+            Provider = FeedProvider.DirectRss,
+            SourceType = FacebookSourceType.Fanpage,
+            SourceKey = "https://example.com/feed.xml",
+            RssUrl = "https://example.com/feed.xml"
+        };
+
+        var url = resolver.ResolveEffectiveFeedUrl(feed);
+
+        Assert.Equal("https://example.com/feed.xml", url);
+    }
+
+    [Fact]
     public void Resolve_ThrowsForDirectRssWithoutAbsoluteUrl()
     {
         var resolver = CreateResolver(new RssBridgeOptions(), new FeedProviderOptions());
@@ -95,14 +138,9 @@ public class FeedUrlResolverTests
     {
         var resolver = CreateResolver(
             new RssBridgeOptions(),
-            new FeedProviderOptions
-            {
-                EnableDirectRss = false,
-                EnableRssHub = true
-            });
+            new FeedProviderOptions { EnableDirectRss = false });
 
         Assert.False(resolver.IsProviderEnabled(FeedProvider.DirectRss));
-        Assert.True(resolver.IsProviderEnabled(FeedProvider.RssHub));
         Assert.True(resolver.IsProviderEnabled(FeedProvider.RssBridge));
     }
 

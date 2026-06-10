@@ -271,6 +271,7 @@ public class Worker : BackgroundService
 
         for (var attempt = 0; attempt <= maxRetries; attempt++)
         {
+            trackedFeed.RssUrl = _feedUrlResolver.ResolveEffectiveFeedUrl(trackedFeed);
             var result = await _rssBridgeClient.GetPostsDetailedAsync(trackedFeed, maxItems, cancellationToken);
             if (!IsRetriableFetchOutcome(result) || attempt >= maxRetries)
             {
@@ -556,7 +557,7 @@ public class Worker : BackgroundService
 
         var alertMessage =
             $"[FB Profile Alert] Source={sampleFeed.SourceKey} has {state.ConsecutiveFailures} consecutive fetch issues ({outcomeLabel}). " +
-            "Cookie may be expired or profile visibility changed. Check RSSHub FB_COOKIE and profile route /facebook/user/{id}.";
+            "Profile visibility may have changed. Check RSS-Bridge FacebookBridge configuration and source accessibility.";
 
         var alertResult = await _discordPublisher.PublishSystemAlertAsync(
             options.FacebookProfileAlertChannelId,

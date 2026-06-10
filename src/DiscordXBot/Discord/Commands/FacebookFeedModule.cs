@@ -18,14 +18,12 @@ public sealed class FacebookFeedModule(
     BotDbContext db,
     IHttpClientFactory httpClientFactory,
     IOptions<RetryOptions> retryOptions,
-    IOptionsMonitor<FeedProviderOptions> feedProviderOptions,
     FeedUrlResolver feedUrlResolver,
     ILogger<FacebookFeedModule> logger) : InteractionModuleBase<SocketInteractionContext>
 {
     private readonly BotDbContext _db = db;
     private readonly IHttpClientFactory _httpClientFactory = httpClientFactory;
     private readonly IOptions<RetryOptions> _retryOptions = retryOptions;
-    private readonly IOptionsMonitor<FeedProviderOptions> _feedProviderOptions = feedProviderOptions;
     private readonly FeedUrlResolver _feedUrlResolver = feedUrlResolver;
     private readonly ILogger<FacebookFeedModule> _logger = logger;
 
@@ -80,10 +78,10 @@ public sealed class FacebookFeedModule(
         }
 
         var sourceTypeLabel = GetSourceTypeLabel(selectedSourceType);
-        var selectedProvider = ParseProvider(provider) ?? _feedProviderOptions.CurrentValue.DefaultFacebookProvider;
+        var selectedProvider = ParseProvider(provider) ?? _feedUrlResolver.GetDefaultProvider(FeedPlatform.Facebook);
         if (selectedProvider == FeedProvider.DirectRss)
         {
-            await ReplyAsync("/add-fb supports RSSHub or RSS-Bridge feeds. Use /add-link for direct FetchRSS URLs.");
+            await ReplyAsync("/add-fb supports RSS-Bridge feeds. Use /add-link for direct RSS URLs.");
             return;
         }
 
@@ -281,11 +279,10 @@ public sealed class FacebookFeedModule(
 
         return value.Trim().ToLowerInvariant() switch
         {
-            "rsshub" => FeedProvider.RssHub,
+            "rssbridge" => FeedProvider.RssBridge,
             "direct" => FeedProvider.DirectRss,
             "directrss" => FeedProvider.DirectRss,
             "fetchrss" => FeedProvider.DirectRss,
-            "rssbridge" => FeedProvider.RssBridge,
             _ => null
         };
     }

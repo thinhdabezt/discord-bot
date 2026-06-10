@@ -16,7 +16,7 @@ public sealed class FeedUrlResolver(
         var options = _feedProviderOptions.CurrentValue;
         return platform switch
         {
-            FeedPlatform.Facebook => options.DefaultFacebookProvider,
+            FeedPlatform.Facebook => FeedProvider.RssBridge,
             _ => options.DefaultXProvider
         };
     }
@@ -29,7 +29,9 @@ public sealed class FeedUrlResolver(
         {
             FeedProvider.RssBridge => true,
             FeedProvider.DirectRss => options.EnableDirectRss,
-            FeedProvider.RssHub => options.EnableRssHub,
+#pragma warning disable CS0618
+            FeedProvider.RssHub => false,
+#pragma warning restore CS0618
             _ => false
         };
     }
@@ -51,9 +53,27 @@ public sealed class FeedUrlResolver(
         {
             FeedProvider.RssBridge => ResolveRssBridge(platform, value, facebookSourceType),
             FeedProvider.DirectRss => ResolveDirectRss(value),
-            FeedProvider.RssHub => ResolveRssHub(platform, value, facebookSourceType),
             _ => throw new NotSupportedException($"Unsupported provider: {provider}")
         };
+    }
+
+    public string ResolveEffectiveFeedUrl(TrackedFeed trackedFeed)
+    {
+        if (trackedFeed.Platform == FeedPlatform.Facebook &&
+            trackedFeed.Provider == FeedProvider.RssBridge)
+        {
+            var source = string.IsNullOrWhiteSpace(trackedFeed.SourceKey)
+                ? trackedFeed.XUsername
+                : trackedFeed.SourceKey;
+
+            return Resolve(
+                FeedPlatform.Facebook,
+                FeedProvider.RssBridge,
+                source,
+                trackedFeed.SourceType);
+        }
+
+        return trackedFeed.RssUrl;
     }
 
     private string ResolveRssBridge(FeedPlatform platform, string source, FacebookSourceType facebookSourceType)
@@ -85,31 +105,4 @@ public sealed class FeedUrlResolver(
         return uri.ToString();
     }
 
-    private string ResolveRssHub(FeedPlatform platform, string source, FacebookSourceType facebookSourceType)
-    {
-        return platform switch
-        {
-            FeedPlatform.X => ResolveXViaRssHub(source),
-            FeedPlatform.Facebook => ResolveFacebookViaRssHub(source, facebookSourceType),
-            _ => throw new NotSupportedException($"Unsupported platform: {platform}")
-        };
-    }
-
-    private string ResolveXViaRssHub(string source)
-    {
-        var baseUrl = _feedProviderOptions.CurrentValue.RssHubBaseUrl.TrimEnd('/');
-        return $"{baseUrl}/twitter/user/{Uri.EscapeDataString(source)}";
-    }
-
-    private string ResolveFacebookViaRssHub(string source, FacebookSourceType sourceType)
-    {
-        var baseUrl = _feedProviderOptions.CurrentValue.RssHubBaseUrl.TrimEnd('/');
-
-        return sourceType switch
-        {
-            FacebookSourceType.Fanpage => $"{baseUrl}/facebook/page/{Uri.EscapeDataString(source)}",
-            FacebookSourceType.Profile => $"{baseUrl}/facebook/user/{Uri.EscapeDataString(source)}",
-            _ => throw new NotSupportedException($"Unsupported Facebook source type: {sourceType}")
-        };
-    }
 }
