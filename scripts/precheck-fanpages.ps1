@@ -97,6 +97,16 @@ function Get-EntryCountFallback {
     return ([regex]::Matches($Content, '<entry(\s|>)', [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)).Count
 }
 
+function Test-RssBridgeDnsError {
+    param([string]$Content)
+
+    if ([string]::IsNullOrWhiteSpace($Content)) {
+        return $false
+    }
+
+    return $Content -match 'Resolving timed out|Could not resolve host|Temporary failure in name resolution|Name or service not known|cURL error[^<]*(resolve|resolving|DNS)'
+}
+
 function Test-FanpageSource {
     param(
         [string]$InputSource,
@@ -129,6 +139,7 @@ function Test-FanpageSource {
 
         $totalEntries = 0
         $errorEntries = 0
+        $bridgeErrorText = ""
 
         try {
             [xml]$xml = $content
@@ -143,21 +154,25 @@ function Test-FanpageSource {
 
                 if ($entryText -match 'Bridge returned error|Unable to find anything useful|Exception') {
                     $errorEntries++
+                    $bridgeErrorText += " " + $entryText
                 }
             }
 
             if ($hasPayloadErrorMarker -and $errorEntries -eq 0) {
                 $errorEntries = [Math]::Max(1, $totalEntries)
+                $bridgeErrorText += " " + $content
             }
         }
         catch {
             $totalEntries = Get-EntryCountFallback -Content $content
             if ($hasPayloadErrorMarker) {
                 $errorEntries = [Math]::Max(1, $totalEntries)
+                $bridgeErrorText += " " + $content
             }
         }
 
         $usableEntries = [Math]::Max(0, $totalEntries - $errorEntries)
+        $hasDnsError = (Test-RssBridgeDnsError -Content $bridgeErrorText) -or (Test-RssBridgeDnsError -Content $content)
 
         $recommendation = "needs-review"
         $note = "Feed reachable"
@@ -165,6 +180,10 @@ function Test-FanpageSource {
         if ($usableEntries -gt 0) {
             $recommendation = "use-add-fb"
             $note = "RSS-Bridge has usable entries"
+        }
+        elseif ($hasDnsError) {
+            $recommendation = "check-rss-bridge-dns"
+            $note = "RSS-Bridge cannot resolve Facebook hostnames"
         }
         elseif ($totalEntries -gt 0 -and $errorEntries -ge $totalEntries) {
             $recommendation = "prefer-add-link"
@@ -241,18 +260,20 @@ $results = foreach ($source in $sources) {
 
 $results | Sort-Object Recommendation, SourceKey | Format-Table SourceKey, HttpStatus, TotalEntries, ErrorEntries, UsableEntries, Recommendation, Note -AutoSize
 
-$usableCount = ($results | Where-Object { $_.Recommendation -eq 'use-add-fb' }).Count
-$preferLinkCount = ($results | Where-Object { $_.Recommendation -eq 'prefer-add-link' }).Count
-$retryCount = ($results | Where-Object { $_.Recommendation -eq 'retry-later' }).Count
-$invalidCount = ($results | Where-Object { $_.Recommendation -eq 'invalid-source' }).Count
-$checkBridgeCount = ($results | Where-Object { $_.Recommendation -eq 'check-rss-bridge' }).Count
+$usableCount = @($results | Where-Object { $_.Recommendation -eq 'use-add-fb' }).Count
+$preferLinkCount = @($results | Where-Object { $_.Recommendation -eq 'prefer-add-link' }).Count
+$retryCount = @($results | Where-Object { $_.Recommendation -eq 'retry-later' }).Count
+$invalidCount = @($results | Where-Object { $_.Recommendation -eq 'invalid-source' }).Count
+$checkBridgeCount = @($results | Where-Object { $_.Recommendation -eq 'check-rss-bridge' }).Count
+$checkBridgeDnsCount = @($results | Where-Object { $_.Recommendation -eq 'check-rss-bridge-dns' }).Count
 
-Write-Host "Summary: use-add-fb=$usableCount, prefer-add-link=$preferLinkCount, retry-later=$retryCount, invalid-source=$invalidCount, check-rss-bridge=$checkBridgeCount" -ForegroundColor Cyan
+Write-Host "Summary: use-add-fb=$usableCount, prefer-add-link=$preferLinkCount, retry-later=$retryCount, invalid-source=$invalidCount, check-rss-bridge=$checkBridgeCount, check-rss-bridge-dns=$checkBridgeDnsCount" -ForegroundColor Cyan
 
-$useAddFbGroup = $results | Where-Object { $_.Recommendation -eq 'use-add-fb' } | Sort-Object SourceKey
-$preferAddLinkGroup = $results | Where-Object { $_.Recommendation -eq 'prefer-add-link' } | Sort-Object SourceKey
+$useAddFbGroup = @($results | Where-Object { $_.Recommendation -eq 'use-add-fb' } | Sort-Object SourceKey)
+$preferAddLinkGroup = @($results | Where-Object { $_.Recommendation -eq 'prefer-add-link' } | Sort-Object SourceKey)
+$checkBridgeDnsGroup = @($results | Where-Object { $_.Recommendation -eq 'check-rss-bridge-dns' } | Sort-Object SourceKey)
 
-if ($useAddFbGroup.Count -gt 0 -or $preferAddLinkGroup.Count -gt 0) {
+if ($useAddFbGroup.Count -gt 0 -or $preferAddLinkGroup.Count -gt 0 -or $checkBridgeDnsGroup.Count -gt 0) {
     Write-Host "" 
     Write-Host "Suggested command plan by source:" -ForegroundColor Cyan
 }
@@ -271,8 +292,15 @@ if ($preferAddLinkGroup.Count -gt 0) {
     }
 }
 
+if ($checkBridgeDnsGroup.Count -gt 0) {
+    Write-Host "[Group: check-rss-bridge-dns]" -ForegroundColor Red
+    foreach ($item in $checkBridgeDnsGroup) {
+        Write-Host "$($item.SourceKey): fix rss-bridge container DNS/network before using /add-fb"
+    }
+}
+
 if ($FailOnUnusable) {
-    $unusableCount = ($results | Where-Object { $_.Recommendation -ne 'use-add-fb' }).Count
+    $unusableCount = @($results | Where-Object { $_.Recommendation -ne 'use-add-fb' }).Count
     if ($unusableCount -gt 0) {
         Fail "FailOnUnusable enabled and found $unusableCount non-usable source(s)."
     }

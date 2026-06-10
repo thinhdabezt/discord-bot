@@ -146,7 +146,15 @@ Recommendation meanings:
 - `prefer-add-link`: feed is reachable but only contains bridge error entries; prefer direct RSS via `/add-link`
 - `retry-later`: feed has no entries at this moment; retry later before deciding
 - `check-rss-bridge`: request failed; verify `rss-bridge` container and URL
+- `check-rss-bridge-dns`: RSS-Bridge returned an Atom error caused by DNS/cURL hostname resolution. Fix the container DNS/network before using `/add-fb`; this is not a reason to switch the same source to `/add-link`.
 - `invalid-source`: source cannot be normalized (bad ID/URL format)
+
+RSS-Bridge Docker runtime is configured by compose with:
+- `.config/rss-bridge/config.ini.php` mounted as `/config/config.ini.php`
+- service DNS resolvers `1.1.1.1` and `8.8.8.8`
+- `[http] timeout = 30` and `retries = 2`
+
+Facebook auth/cookie configuration is separate. Only investigate RSS-Bridge service-specific Facebook auth after DNS/network checks are healthy and the bridge can resolve and connect to Facebook.
 
 ## Facebook Profile Safety Alerts
 When enabling profile feeds through RSS-Bridge FacebookBridge, configure these env vars in `.env`:

@@ -21,6 +21,7 @@
 - Run smoke test script after each release
 - Confirm smoke test output contains slash command registration summary for `add-x`, `add-fb`, and `add-link` command families
 - Run `scripts/precheck-fanpages.ps1` for batch Facebook onboarding, and only use `/add-fb` for sources marked `use-add-fb`
+- Treat `check-rss-bridge-dns` from `scripts/precheck-fanpages.ps1` as a container DNS/network issue; verify the RSS-Bridge `/config/config.ini.php` mount and service DNS before onboarding Facebook sources
 - Run `scripts/integration-evidence.ps1` after real `/add-fb` and `/add-link` setup to verify DB + publish evidence
 - For profile sources, verify `/add-fb` uses numeric ID with `sourceType=profile` and evidence script uses `-FacebookSourceType profile`
 - If profile alerts are enabled, verify `FEEDPROVIDERS__FACEBOOKPROFILEALERTCHANNELID` points to an admin-only channel
@@ -35,7 +36,7 @@
 ## Monitoring
 - Track publish success/failure ratio daily
 - Alert on sustained fetch failures per username
-- Alert on repeated Facebook profile fetch issues (403/error-only/empty after prior success) and check RSS-Bridge FacebookBridge access/configuration
+- Alert on repeated Facebook profile fetch issues (403/error-only/empty after prior success) and check RSS-Bridge FacebookBridge access/configuration; resolve DNS/cURL resolution errors before investigating Facebook auth/cookies
 - Alert on unusual spikes of Apify fallback attempts per source (may indicate upstream RSS breakage)
 - Alert when bot disconnects from gateway repeatedly
 

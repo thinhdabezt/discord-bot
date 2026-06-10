@@ -21,8 +21,13 @@ services:
     image: rssbridge/rss-bridge:latest
     container_name: rss-bridge
     restart: unless-stopped
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
     ports:
       - "3000:80"
+    volumes:
+      - ./.config/rss-bridge/config.ini.php:/config/config.ini.php:ro
     healthcheck:
       test: ["CMD", "php", "-v"]
       interval: 30s

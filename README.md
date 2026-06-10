@@ -310,6 +310,13 @@ PowerShell
 
 .\\scripts\\precheck\-fanpages.ps1 \-FanpageSources 10150123547145211,100071458686024
 
+Precheck recommendation notes:
+
+* `use-add-fb`: source is suitable for `/add-fb`.
+* `prefer-add-link`: RSS-Bridge is reachable, but FacebookBridge returned a generic bridge/parser error; use a direct RSS URL via `/add-link` when available.
+* `check-rss-bridge-dns`: RSS-Bridge returned a cURL/DNS resolution error. Fix the `rss-bridge` container DNS/network and `/config/config.ini.php` mount before onboarding that source.
+* Facebook auth/cookie setup is separate; only check it after DNS/network is healthy.
+
 ### **10.3 Checklist release**
 
 PowerShell
