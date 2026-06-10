@@ -15,7 +15,7 @@ This matrix documents which variables are required for each deployment mode.
 | POSTGRES_DB | Recommended | No | discordbot | discordbot | Used by local Docker PostgreSQL service. |
 | POSTGRES_USER | Recommended | No | postgres | postgres | Used by local Docker PostgreSQL service. |
 | POSTGRES_PASSWORD | Yes | No | postgres | ChangeMe_StrongPassword | Must be changed for production. |
-| CONNECTIONSTRINGS__DEFAULT | No | Yes | local appsettings value | Host=localhost;Port=55432;Database=discordbot;Username=postgres;Password=... | For external DB or source-run mode. |
+| CONNECTIONSTRINGS__DEFAULT | No | Yes | local appsettings value | Host=db.<project-ref>.supabase.co;Port=5432;Database=postgres;Username=postgres;Password=...;SSL Mode=Require;Trust Server Certificate=true | For external DB or source-run mode. Supabase direct connections require IPv6 support or the IPv4 add-on. |
 | RSSBRIDGE__BASEURL | No | Yes | http://localhost:3000 | http://localhost:3000 | In docker-prod the bot uses internal URL from compose. |
 | RSSBRIDGE__ENABLENITTERFALLBACK | Optional | Optional | true | true | If enabled, bot falls back to Nitter RSS when TwitterBridge returns synthetic error items. |
 | RSSBRIDGE__NITTERBASEURL | Optional | Optional | https://nitter.net | https://nitter.net | Base URL for Nitter fallback endpoint. |
