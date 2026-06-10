@@ -20,17 +20,13 @@ This matrix documents which variables are required for each deployment mode.
 | RSSBRIDGE__ENABLENITTERFALLBACK | Optional | Optional | true | true | If enabled, bot falls back to Nitter RSS when TwitterBridge returns synthetic error items. |
 | RSSBRIDGE__NITTERBASEURL | Optional | Optional | https://nitter.net | https://nitter.net | Base URL for Nitter fallback endpoint. |
 | FEEDPROVIDERS__ENABLEDIRECTRSS | Optional | Optional | true | true | Enables tracking direct RSS URLs (for example FetchRSS). |
-| FEEDPROVIDERS__ENABLERSSHUB | Optional | Optional | false | true | Enables RSSHub provider usage for new feed registrations. |
-| FEEDPROVIDERS__RSSHUBBASEURL | Optional | Optional | http://rsshub:1200 | http://rsshub:1200 | RSSHub base URL used by resolver for X/FB feeds. |
 | FEEDPROVIDERS__DEFAULTXPROVIDER | Optional | Optional | RssBridge | RssBridge | Default provider for /add-x command. |
-| FEEDPROVIDERS__DEFAULTFACEBOOKPROVIDER | Optional | Optional | RssHub | RssHub | Default provider for /add-fb fanpage command path. |
-| FEEDPROVIDERS__ENABLEFACEBOOKPROFILEALERTS | Optional | Optional | false | true | Enables runtime admin alerts when FB profile feeds show repeated cookie/visibility failures. |
+| FEEDPROVIDERS__DEFAULTFACEBOOKPROVIDER | Optional | Optional | RssBridge | RssBridge | Default provider for /add-fb fanpage/profile command path. |
+| FEEDPROVIDERS__ENABLEFACEBOOKPROFILEALERTS | Optional | Optional | false | true | Enables runtime admin alerts when FB profile feeds show repeated visibility/fetch failures. |
 | FEEDPROVIDERS__FACEBOOKPROFILEALERTCHANNELID | Optional | Optional | 0 | 123456789012345678 | Discord channel ID receiving profile health alerts. 0 disables channel delivery. |
 | FEEDPROVIDERS__FACEBOOKPROFILEFAILURETHRESHOLD | Optional | Optional | 3 | 3 | Number of consecutive profile fetch failures before alerting. |
 | FEEDPROVIDERS__FACEBOOKPROFILEALERTCOOLDOWNMINUTES | Optional | Optional | 180 | 180 | Minimum minutes between repeated alerts for the same profile source. |
-| FB_COOKIE | Optional | Optional | empty | c_user=...;xs=... | Cookie used by RSSHub for Facebook personal profile routes. Keep secret. |
-| FB_PAGES_LIMIT | Optional | Optional | 3 | 3 | RSSHub fetch page limit for Facebook routes to reduce aggressive crawling. |
-| APIFYFALLBACK__ENABLED | Optional | Optional | false | true | Enables Apify fallback when Facebook RSS providers fail repeatedly. |
+| APIFYFALLBACK__ENABLED | Optional | Optional | false | true | Enables Apify fallback when RSS-Bridge FacebookBridge fails repeatedly. |
 | APIFYFALLBACK__APIBASEURL | Optional | Optional | https://api.apify.com/v2 | https://api.apify.com/v2 | Base URL for Apify API endpoints. |
 | APIFYFALLBACK__APITOKEN | Optional | Optional | empty | apify_api_... | API token for running Apify actor. Keep secret. |
 | APIFYFALLBACK__ACTORID | Optional | Optional | apify/facebook-posts-scraper | apify/facebook-posts-scraper | Actor identifier used for fallback scraping. |

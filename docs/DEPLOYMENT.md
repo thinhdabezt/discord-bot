@@ -117,7 +117,7 @@ After you run `/add-fb` and `/add-link` with real test inputs, verify persisted 
 ```
 
 This script checks:
-- `tracked_feeds` contains Facebook source mapping with requested source type (`Platform=Facebook`, `SourceType=Fanpage|Profile`, `Provider=RssHub` or `Provider=RssBridge`)
+- `tracked_feeds` contains Facebook source mapping with requested source type (`Platform=Facebook`, `SourceType=Fanpage|Profile`, `Provider=RssBridge`)
 - `tracked_feeds` contains direct RSS mapping (`Provider=DirectRss`)
 - `processed_tweets` contains publish evidence for the configured lookback window
 - bot logs include publish activity pattern
@@ -149,12 +149,11 @@ Recommendation meanings:
 - `invalid-source`: source cannot be normalized (bad ID/URL format)
 
 ## Facebook Profile Safety Alerts
-When enabling profile feeds via RSSHub cookies, configure these env vars in `.env`:
+When enabling profile feeds through RSS-Bridge FacebookBridge, configure these env vars in `.env`:
 - `FEEDPROVIDERS__ENABLEFACEBOOKPROFILEALERTS=true`
 - `FEEDPROVIDERS__FACEBOOKPROFILEALERTCHANNELID=<discord_channel_id>`
 - `FEEDPROVIDERS__FACEBOOKPROFILEFAILURETHRESHOLD=3`
 - `FEEDPROVIDERS__FACEBOOKPROFILEALERTCOOLDOWNMINUTES=180`
-- `FB_COOKIE=<facebook_cookie_value>`
 
 Alert behavior:
 - The worker tracks consecutive profile fetch failures (`HTTP 403`, error-only feed, or repeated empty feed after prior success).
@@ -162,7 +161,7 @@ Alert behavior:
 - Cooldown prevents alert spam for the same profile source.
 
 ## Apify Fallback For Facebook Sources
-To recover posts when RSSHub/RSS-Bridge fail repeatedly for Facebook fanpage/profile sources, configure:
+To recover posts when RSS-Bridge FacebookBridge fails repeatedly for Facebook fanpage/profile sources, configure:
 - `APIFYFALLBACK__ENABLED=true`
 - `APIFYFALLBACK__APITOKEN=<apify_api_token>`
 - `APIFYFALLBACK__ACTORID=apify/facebook-posts-scraper`
@@ -202,8 +201,6 @@ Notes:
 docker compose --profile prod logs -f bot
 docker compose --profile prod logs -f db
 docker compose --profile prod logs -f rss-bridge
-docker compose --profile prod logs -f rsshub
-docker compose --profile prod logs -f redis
 ```
 
 ## Rollback

@@ -35,7 +35,7 @@
 ## Monitoring
 - Track publish success/failure ratio daily
 - Alert on sustained fetch failures per username
-- Alert on repeated Facebook profile fetch issues (403/error-only/empty after prior success) and rotate FB cookie when triggered
+- Alert on repeated Facebook profile fetch issues (403/error-only/empty after prior success) and check RSS-Bridge FacebookBridge access/configuration
 - Alert on unusual spikes of Apify fallback attempts per source (may indicate upstream RSS breakage)
 - Alert when bot disconnects from gateway repeatedly
 

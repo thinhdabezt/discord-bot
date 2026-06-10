@@ -40,8 +40,6 @@ Service chính trong docker-compose.yml:
 
 * db: PostgreSQL  
 * rss-bridge: RSS bridge provider  
-* rsshub: RSSHub provider  
-* redis: Cache cho RSSHub  
 * bot: .NET worker \+ Discord gateway
 
 Code chính:
@@ -201,12 +199,6 @@ Thêm profile:
 
 Plaintext
 
-/add-fb fanpageOrId:000000000000000 channel:\<\#channel\> sourceType:profile provider:rsshub
-
-Hoặc profile với RSS-Bridge:
-
-Plaintext
-
 /add-fb fanpageOrId:000000000000000 channel:\<\#channel\> sourceType:profile provider:rssbridge
 
 Liệt kê:
@@ -310,7 +302,6 @@ PowerShell
 
 docker compose \-\-profile prod logs \-f bot  
 docker compose \-\-profile prod logs \-f rss\-bridge  
-docker compose \-\-profile prod logs \-f rsshub  
 docker compose \-\-profile prod logs \-f db
 
 ### **10.2 Kiểm tra sức khỏe batch Facebook trước onboarding**
@@ -336,12 +327,10 @@ Trạng thái mới:
 
 * Command có thể vẫn add được feed nếu lỗi là tạm thời (5xx/timeout/network).  
 * Nếu vẫn fail, thử:  
-  1. Kiểm tra provider đang dùng (rsshub/rssbridge).  
-  2. Kiểm tra service:
+  1. Kiểm tra RSS-Bridge service:
 
   PowerShell  
      docker compose \-\-profile prod ps  
-     docker compose \-\-profile prod logs \-\-since 10m rsshub  
      docker compose \-\-profile prod logs \-\-since 10m rss\-bridge
 
   3. Dùng precheck-fanpages.ps1 để phân loại source.
