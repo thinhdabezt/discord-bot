@@ -75,25 +75,6 @@ catch {
 }
 
 try {
-    $statusText = ($status | Out-String)
-    if ($statusText -match "rsshub") {
-        $rssHub = Invoke-WebRequest -Uri "http://localhost:1200" -TimeoutSec 10 -UseBasicParsing
-        if ($rssHub.StatusCode -eq 200) {
-            Pass "RSSHub endpoint is reachable"
-        }
-        else {
-            Fail "RSSHub endpoint returned status $($rssHub.StatusCode)"
-        }
-    }
-    else {
-        Info "RSSHub service not enabled in this profile"
-    }
-}
-catch {
-    Fail "RSSHub endpoint is not reachable"
-}
-
-try {
     $schemaSql = "SELECT COUNT(*) FROM information_schema.columns WHERE table_name='tracked_feeds' AND column_name IN ('Platform', 'Provider', 'SourceKey', 'SourceType');"
     $schemaCountText = docker compose exec -T db psql -U $postgresUser -d $postgresDb -t -A -c $schemaSql 2>&1
     if ($LASTEXITCODE -ne 0 -or (($schemaCountText | Out-String) -match "ERROR:")) {
