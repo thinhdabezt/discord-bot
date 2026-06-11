@@ -127,6 +127,31 @@ public class DiscordPublisherTests
     }
 
     [Fact]
+    public void BuildMessageText_FormatsInstagramHeader()
+    {
+        var postedAtUtc = new DateTime(2026, 01, 02, 03, 04, 05, DateTimeKind.Utc);
+        var feed = new TrackedFeed
+        {
+            Platform = FeedPlatform.Instagram,
+            SourceKey = "nasa",
+            XUsername = "ig_nasa"
+        };
+
+        var text = DiscordPublisher.BuildMessageText(
+            feed: feed,
+            caption: "IG update",
+            postedAtUtc: postedAtUtc,
+            postUrl: "https://www.instagram.com/p/example/");
+
+        Assert.Equal(
+            "IG: @nasa\n" +
+            "Caption: IG update\n" +
+            "Posted: 2026-01-02 03:04:05 UTC\n" +
+            "Link: https://www.instagram.com/p/example/",
+            text);
+    }
+
+    [Fact]
     public void NormalizePostUrlForDisplay_ConvertsNitterStatusToXCom()
     {
         var normalized = DiscordPublisher.NormalizePostUrlForDisplay(

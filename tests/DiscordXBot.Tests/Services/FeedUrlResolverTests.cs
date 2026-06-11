@@ -33,6 +33,20 @@ public class FeedUrlResolverTests
     }
 
     [Fact]
+    public void Resolve_UsesRssBridgeForInstagram()
+    {
+        var resolver = CreateResolver(
+            new RssBridgeOptions { BaseUrl = "http://rss-bridge:80" },
+            new FeedProviderOptions());
+
+        var url = resolver.Resolve(FeedPlatform.Instagram, FeedProvider.RssBridge, "nasa");
+
+        Assert.Equal(
+            "http://rss-bridge:80/?action=display&bridge=InstagramBridge&context=Username&u=nasa&media_type=all&direct_links=on&format=Atom",
+            url);
+    }
+
+    [Fact]
     public void Resolve_UsesStableFacebookUrlForApify()
     {
         var resolver = CreateResolver(
@@ -58,6 +72,18 @@ public class FeedUrlResolverTests
         var provider = resolver.GetDefaultProvider(FeedPlatform.Facebook);
 
         Assert.Equal(FeedProvider.Apify, provider);
+    }
+
+    [Fact]
+    public void GetDefaultProvider_UsesRssBridgeForInstagram()
+    {
+        var resolver = CreateResolver(
+            new RssBridgeOptions { BaseUrl = "http://rss-bridge:80" },
+            new FeedProviderOptions());
+
+        var provider = resolver.GetDefaultProvider(FeedPlatform.Instagram);
+
+        Assert.Equal(FeedProvider.RssBridge, provider);
     }
 
 #pragma warning disable CS0618
@@ -92,6 +118,29 @@ public class FeedUrlResolverTests
         var url = resolver.ResolveEffectiveFeedUrl(feed);
 
         Assert.Equal("https://www.facebook.com/61574718883158/", url);
+    }
+
+    [Fact]
+    public void ResolveEffectiveFeedUrl_RefreshesInstagramRssBridgeUrlFromSourceKey()
+    {
+        var resolver = CreateResolver(
+            new RssBridgeOptions { BaseUrl = "http://rss-bridge:80" },
+            new FeedProviderOptions());
+
+        var feed = new TrackedFeed
+        {
+            Platform = FeedPlatform.Instagram,
+            Provider = FeedProvider.RssBridge,
+            SourceKey = "nasa",
+            XUsername = "ig_nasa",
+            RssUrl = "http://old/rss"
+        };
+
+        var url = resolver.ResolveEffectiveFeedUrl(feed);
+
+        Assert.Equal(
+            "http://rss-bridge:80/?action=display&bridge=InstagramBridge&context=Username&u=nasa&media_type=all&direct_links=on&format=Atom",
+            url);
     }
 
     [Fact]

@@ -237,6 +237,10 @@ public sealed class FeedLinkModule(
             case "facebook":
                 platform = FeedPlatform.Facebook;
                 return true;
+            case "ig":
+            case "instagram":
+                platform = FeedPlatform.Instagram;
+                return true;
             default:
                 platform = FeedPlatform.X;
                 return false;
@@ -257,7 +261,12 @@ public sealed class FeedLinkModule(
 
     private static string BuildLegacyUsername(string sourceKey, FeedPlatform platform)
     {
-        var prefix = platform == FeedPlatform.Facebook ? "fb" : "x";
+        var prefix = platform switch
+        {
+            FeedPlatform.Facebook => "fb",
+            FeedPlatform.Instagram => "ig",
+            _ => "x"
+        };
         var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(sourceKey))).ToLowerInvariant()[..20];
         return $"{prefix}_link_{hash}";
     }

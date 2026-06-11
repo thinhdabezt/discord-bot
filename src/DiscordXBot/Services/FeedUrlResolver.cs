@@ -17,6 +17,7 @@ public sealed class FeedUrlResolver(
         return platform switch
         {
             FeedPlatform.Facebook => FeedProvider.Apify,
+            FeedPlatform.Instagram => FeedProvider.RssBridge,
             _ => options.DefaultXProvider
         };
     }
@@ -61,7 +62,7 @@ public sealed class FeedUrlResolver(
 
     public string ResolveEffectiveFeedUrl(TrackedFeed trackedFeed)
     {
-        if (trackedFeed.Platform == FeedPlatform.X &&
+        if ((trackedFeed.Platform == FeedPlatform.X || trackedFeed.Platform == FeedPlatform.Instagram) &&
             trackedFeed.Provider == FeedProvider.RssBridge)
         {
             var source = string.IsNullOrWhiteSpace(trackedFeed.SourceKey)
@@ -69,7 +70,7 @@ public sealed class FeedUrlResolver(
                 : trackedFeed.SourceKey;
 
             return Resolve(
-                FeedPlatform.X,
+                trackedFeed.Platform,
                 FeedProvider.RssBridge,
                 source,
                 trackedFeed.SourceType);
@@ -85,6 +86,7 @@ public sealed class FeedUrlResolver(
         return platform switch
         {
             FeedPlatform.X => $"{baseUrl}/?action=display&bridge=TwitterBridge&context=By+username&u={Uri.EscapeDataString(source)}&format=Atom",
+            FeedPlatform.Instagram => $"{baseUrl}/?action=display&bridge=InstagramBridge&context=Username&u={Uri.EscapeDataString(source)}&media_type=all&direct_links=on&format=Atom",
             _ => throw new NotSupportedException($"Unsupported platform: {platform}")
         };
     }

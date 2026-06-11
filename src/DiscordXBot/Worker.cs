@@ -337,7 +337,7 @@ public class Worker : BackgroundService
             return mediaType == ParsedMediaType.ImageOnly;
         }
 
-        // Fanpage/direct RSS paths can publish caption and mixed posts.
+        // Non-X paths can publish caption and mixed posts.
         return mediaType is ParsedMediaType.ImageOnly or ParsedMediaType.CaptionOnly or ParsedMediaType.Mixed;
     }
 

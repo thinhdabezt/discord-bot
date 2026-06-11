@@ -3,7 +3,8 @@ namespace DiscordXBot.Data.Entities;
 public enum FeedPlatform
 {
     X = 0,
-    Facebook = 1
+    Facebook = 1,
+    Instagram = 2
 }
 
 public enum FacebookSourceType
