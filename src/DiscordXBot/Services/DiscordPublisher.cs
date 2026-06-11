@@ -262,6 +262,11 @@ public sealed class DiscordPublisher(
         }
 
         var username = string.IsNullOrWhiteSpace(feed.SourceKey) ? feed.XUsername : feed.SourceKey;
+        if (feed.Platform == FeedPlatform.Instagram)
+        {
+            return $"IG: @{username}";
+        }
+
         return $"X: @{username}";
     }
 

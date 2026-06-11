@@ -22,21 +22,32 @@ public class FeedUrlResolverTests
     }
 
     [Fact]
-    public void Resolve_UsesRssBridgeForFacebook()
+    public void Resolve_ThrowsForFacebookRssBridge()
     {
         var resolver = CreateResolver(
             new RssBridgeOptions { BaseUrl = "http://rss-bridge:80" },
             new FeedProviderOptions());
 
-        var url = resolver.Resolve(FeedPlatform.Facebook, FeedProvider.RssBridge, "10150123547145211");
+        Assert.Throws<NotSupportedException>(() =>
+            resolver.Resolve(FeedPlatform.Facebook, FeedProvider.RssBridge, "10150123547145211"));
+    }
+
+    [Fact]
+    public void Resolve_UsesRssBridgeForInstagram()
+    {
+        var resolver = CreateResolver(
+            new RssBridgeOptions { BaseUrl = "http://rss-bridge:80" },
+            new FeedProviderOptions());
+
+        var url = resolver.Resolve(FeedPlatform.Instagram, FeedProvider.RssBridge, "nasa");
 
         Assert.Equal(
-            "http://rss-bridge:80/?action=display&bridge=FacebookBridge&context=User&u=10150123547145211&media_type=all&format=Atom",
+            "http://rss-bridge:80/?action=display&bridge=InstagramBridge&context=Username&u=nasa&media_type=all&direct_links=on&format=Atom",
             url);
     }
 
     [Fact]
-    public void Resolve_UsesRssBridgeForFacebookProfile()
+    public void Resolve_UsesStableFacebookUrlForApify()
     {
         var resolver = CreateResolver(
             new RssBridgeOptions { BaseUrl = "http://rss-bridge:80" },
@@ -44,17 +55,15 @@ public class FeedUrlResolverTests
 
         var url = resolver.Resolve(
             FeedPlatform.Facebook,
-            FeedProvider.RssBridge,
-            "10001234567890",
+            FeedProvider.Apify,
+            "nasa",
             FacebookSourceType.Profile);
 
-        Assert.Equal(
-            "http://rss-bridge:80/?action=display&bridge=FacebookBridge&context=User&u=10001234567890&media_type=all&format=Atom",
-            url);
+        Assert.Equal("https://www.facebook.com/nasa/", url);
     }
 
     [Fact]
-    public void GetDefaultProvider_UsesRssBridgeForFacebook()
+    public void GetDefaultProvider_UsesApifyForFacebook()
     {
         var resolver = CreateResolver(
             new RssBridgeOptions { BaseUrl = "http://rss-bridge:80" },
@@ -62,25 +71,35 @@ public class FeedUrlResolverTests
 
         var provider = resolver.GetDefaultProvider(FeedPlatform.Facebook);
 
+        Assert.Equal(FeedProvider.Apify, provider);
+    }
+
+    [Fact]
+    public void GetDefaultProvider_UsesRssBridgeForInstagram()
+    {
+        var resolver = CreateResolver(
+            new RssBridgeOptions { BaseUrl = "http://rss-bridge:80" },
+            new FeedProviderOptions());
+
+        var provider = resolver.GetDefaultProvider(FeedPlatform.Instagram);
+
         Assert.Equal(FeedProvider.RssBridge, provider);
     }
 
 #pragma warning disable CS0618
     [Fact]
-    public void GetDefaultProvider_IgnoresLegacyRssHubFacebookConfig()
+    public void IsProviderEnabled_DisablesLegacyRssHub()
     {
         var resolver = CreateResolver(
             new RssBridgeOptions { BaseUrl = "http://rss-bridge:80" },
-            new FeedProviderOptions { DefaultFacebookProvider = FeedProvider.RssHub });
+            new FeedProviderOptions());
 
-        var provider = resolver.GetDefaultProvider(FeedPlatform.Facebook);
-
-        Assert.Equal(FeedProvider.RssBridge, provider);
+        Assert.False(resolver.IsProviderEnabled(FeedProvider.RssHub));
     }
 #pragma warning restore CS0618
 
     [Fact]
-    public void ResolveEffectiveFeedUrl_RefreshesFacebookRssBridgeUrlFromSourceKey()
+    public void ResolveEffectiveFeedUrl_KeepsApifyFacebookUrl()
     {
         var resolver = CreateResolver(
             new RssBridgeOptions { BaseUrl = "http://rss-bridge:80" },
@@ -89,17 +108,38 @@ public class FeedUrlResolverTests
         var feed = new TrackedFeed
         {
             Platform = FeedPlatform.Facebook,
-            Provider = FeedProvider.RssBridge,
+            Provider = FeedProvider.Apify,
             SourceType = FacebookSourceType.Profile,
             SourceKey = "61574718883158",
             XUsername = "fb_61574718883158",
-            RssUrl = "http://rsshub:1200/facebook/user/61574718883158"
+            RssUrl = "https://www.facebook.com/61574718883158/"
+        };
+
+        var url = resolver.ResolveEffectiveFeedUrl(feed);
+
+        Assert.Equal("https://www.facebook.com/61574718883158/", url);
+    }
+
+    [Fact]
+    public void ResolveEffectiveFeedUrl_RefreshesInstagramRssBridgeUrlFromSourceKey()
+    {
+        var resolver = CreateResolver(
+            new RssBridgeOptions { BaseUrl = "http://rss-bridge:80" },
+            new FeedProviderOptions());
+
+        var feed = new TrackedFeed
+        {
+            Platform = FeedPlatform.Instagram,
+            Provider = FeedProvider.RssBridge,
+            SourceKey = "nasa",
+            XUsername = "ig_nasa",
+            RssUrl = "http://old/rss"
         };
 
         var url = resolver.ResolveEffectiveFeedUrl(feed);
 
         Assert.Equal(
-            "http://rss-bridge:80/?action=display&bridge=FacebookBridge&context=User&u=61574718883158&media_type=all&format=Atom",
+            "http://rss-bridge:80/?action=display&bridge=InstagramBridge&context=Username&u=nasa&media_type=all&direct_links=on&format=Atom",
             url);
     }
 
@@ -142,6 +182,7 @@ public class FeedUrlResolverTests
 
         Assert.False(resolver.IsProviderEnabled(FeedProvider.DirectRss));
         Assert.True(resolver.IsProviderEnabled(FeedProvider.RssBridge));
+        Assert.True(resolver.IsProviderEnabled(FeedProvider.Apify));
     }
 
     private static FeedUrlResolver CreateResolver(RssBridgeOptions rssBridge, FeedProviderOptions provider)

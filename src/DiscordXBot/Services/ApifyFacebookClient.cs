@@ -12,11 +12,11 @@ namespace DiscordXBot.Services;
 
 public sealed class ApifyFacebookClient(
     IHttpClientFactory httpClientFactory,
-    IOptionsMonitor<ApifyFallbackOptions> apifyOptions,
+    IOptionsMonitor<ApifyOptions> apifyOptions,
     ILogger<ApifyFacebookClient> logger)
 {
     private readonly IHttpClientFactory _httpClientFactory = httpClientFactory;
-    private readonly IOptionsMonitor<ApifyFallbackOptions> _apifyOptions = apifyOptions;
+    private readonly IOptionsMonitor<ApifyOptions> _apifyOptions = apifyOptions;
     private readonly ILogger<ApifyFacebookClient> _logger = logger;
 
     public async Task<IReadOnlyList<RssPost>> FetchPostsAsync(
@@ -70,7 +70,7 @@ public sealed class ApifyFacebookClient(
             if (string.IsNullOrWhiteSpace(datasetId))
             {
                 _logger.LogWarning(
-                    "Apify fallback run finished without dataset id. Source={SourceKey}, RunId={RunId}",
+                    "Apify run finished without dataset id. Source={SourceKey}, RunId={RunId}",
                     trackedFeed.SourceKey,
                     runId);
                 return [];
@@ -86,7 +86,7 @@ public sealed class ApifyFacebookClient(
             if (posts.Count > 0)
             {
                 _logger.LogInformation(
-                    "Apify fallback retrieved {Count} post(s) for source {SourceKey}. RunId={RunId}",
+                    "Apify retrieved {Count} post(s) for source {SourceKey}. RunId={RunId}",
                     posts.Count,
                     trackedFeed.SourceKey,
                     runId);
@@ -97,7 +97,7 @@ public sealed class ApifyFacebookClient(
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
             _logger.LogWarning(
-                "Apify fallback timed out for source {SourceKey}",
+                "Apify timed out for source {SourceKey}",
                 trackedFeed.SourceKey);
             return [];
         }
@@ -105,7 +105,7 @@ public sealed class ApifyFacebookClient(
         {
             _logger.LogWarning(
                 ex,
-                "Apify fallback failed for source {SourceKey}",
+                "Apify failed for source {SourceKey}",
                 trackedFeed.SourceKey);
             return [];
         }
@@ -400,7 +400,7 @@ public sealed class ApifyFacebookClient(
         return sb.ToString();
     }
 
-    private static bool IsSourceTypeEnabled(FacebookSourceType sourceType, ApifyFallbackOptions options)
+    private static bool IsSourceTypeEnabled(FacebookSourceType sourceType, ApifyOptions options)
     {
         return sourceType switch
         {

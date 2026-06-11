@@ -5,6 +5,7 @@
 
 # dotenv files
 .env
+config/direct-rss-sources.local.csv
 
 # User-specific files
 *.rsuser

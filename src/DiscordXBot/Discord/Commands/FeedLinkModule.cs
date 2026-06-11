@@ -8,22 +8,19 @@ using DiscordXBot.Data;
 using DiscordXBot.Data.Entities;
 using DiscordXBot.Services;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Options;
 using Npgsql;
 
 namespace DiscordXBot.Discord.Commands;
 
 public sealed class FeedLinkModule(
     BotDbContext db,
-    IHttpClientFactory httpClientFactory,
-    IOptions<RetryOptions> retryOptions,
     FeedUrlResolver feedUrlResolver,
+    RssFeedValidator rssFeedValidator,
     ILogger<FeedLinkModule> logger) : InteractionModuleBase<SocketInteractionContext>
 {
     private readonly BotDbContext _db = db;
-    private readonly IHttpClientFactory _httpClientFactory = httpClientFactory;
-    private readonly IOptions<RetryOptions> _retryOptions = retryOptions;
     private readonly FeedUrlResolver _feedUrlResolver = feedUrlResolver;
+    private readonly RssFeedValidator _rssFeedValidator = rssFeedValidator;
     private readonly ILogger<FeedLinkModule> _logger = logger;
 
     [SlashCommand("add-link", "Add a direct RSS link (FetchRSS or any RSS URL)")]
@@ -72,9 +69,10 @@ public sealed class FeedLinkModule(
             return;
         }
 
-        if (!await ValidateRssAsync(resolvedUrl))
+        var validation = await _rssFeedValidator.ValidateAsync(resolvedUrl);
+        if (!validation.IsValid)
         {
-            await ReplyAsync("Unable to validate this RSS URL.");
+            await ReplyAsync($"Unable to validate this RSS URL. {validation.Reason}");
             return;
         }
 
@@ -226,52 +224,6 @@ public sealed class FeedLinkModule(
         await ReplyAsync($"Removed {feeds.Count} direct RSS mapping(s).");
     }
 
-    private async Task<bool> ValidateRssAsync(string rssUrl)
-    {
-        var maxRetries = Math.Max(0, _retryOptions.Value.MaxRetries);
-        var initialDelaySeconds = Math.Max(1, _retryOptions.Value.InitialDelaySeconds);
-
-        for (var attempt = 0; attempt <= maxRetries; attempt++)
-        {
-            try
-            {
-                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(8));
-                var client = _httpClientFactory.CreateClient();
-                using var response = await client.GetAsync(rssUrl, HttpCompletionOption.ResponseHeadersRead, cts.Token);
-
-                if (response.IsSuccessStatusCode)
-                {
-                    return true;
-                }
-
-                if ((int)response.StatusCode >= 500 && attempt < maxRetries)
-                {
-                    var delay = TimeSpan.FromSeconds(initialDelaySeconds * Math.Pow(2, attempt));
-                    await Task.Delay(delay);
-                    continue;
-                }
-
-                return false;
-            }
-            catch (OperationCanceledException) when (attempt < maxRetries)
-            {
-                var delay = TimeSpan.FromSeconds(initialDelaySeconds * Math.Pow(2, attempt));
-                await Task.Delay(delay);
-            }
-            catch (HttpRequestException) when (attempt < maxRetries)
-            {
-                var delay = TimeSpan.FromSeconds(initialDelaySeconds * Math.Pow(2, attempt));
-                await Task.Delay(delay);
-            }
-            catch
-            {
-                return false;
-            }
-        }
-
-        return false;
-    }
-
     private static bool TryParsePlatform(string value, out FeedPlatform platform)
     {
         var normalized = value.Trim().ToLowerInvariant();
@@ -284,6 +236,10 @@ public sealed class FeedLinkModule(
             case "fb":
             case "facebook":
                 platform = FeedPlatform.Facebook;
+                return true;
+            case "ig":
+            case "instagram":
+                platform = FeedPlatform.Instagram;
                 return true;
             default:
                 platform = FeedPlatform.X;
@@ -305,7 +261,12 @@ public sealed class FeedLinkModule(
 
     private static string BuildLegacyUsername(string sourceKey, FeedPlatform platform)
     {
-        var prefix = platform == FeedPlatform.Facebook ? "fb" : "x";
+        var prefix = platform switch
+        {
+            FeedPlatform.Facebook => "fb",
+            FeedPlatform.Instagram => "ig",
+            _ => "x"
+        };
         var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(sourceKey))).ToLowerInvariant()[..20];
         return $"{prefix}_link_{hash}";
     }

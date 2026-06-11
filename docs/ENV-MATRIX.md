@@ -15,36 +15,24 @@ This matrix documents which variables are required for each deployment mode.
 | POSTGRES_DB | Recommended | No | discordbot | discordbot | Used by local Docker PostgreSQL service. |
 | POSTGRES_USER | Recommended | No | postgres | postgres | Used by local Docker PostgreSQL service. |
 | POSTGRES_PASSWORD | Yes | No | postgres | ChangeMe_StrongPassword | Must be changed for production. |
-| CONNECTIONSTRINGS__DEFAULT | No | Yes | local appsettings value | Host=localhost;Port=55432;Database=discordbot;Username=postgres;Password=... | For external DB or source-run mode. |
-| RSSBRIDGE__BASEURL | No | Yes | http://localhost:3000 | http://localhost:3000 | In docker-prod the bot uses internal URL from compose. |
+| CONNECTIONSTRINGS__DEFAULT | No | Yes | local appsettings value | Host=db.<project-ref>.supabase.co;Port=5432;Database=postgres;Username=postgres;Password=...;SSL Mode=Require;Trust Server Certificate=true | For external DB or source-run mode. Supabase direct connections require IPv6 support or the IPv4 add-on. |
+| RSSBRIDGE__BASEURL | No | Yes | http://localhost:3000 | http://localhost:3000 | RSS-Bridge is used for X/Twitter feeds. Facebook `/add-fb` does not use RSS-Bridge. |
 | RSSBRIDGE__ENABLENITTERFALLBACK | Optional | Optional | true | true | If enabled, bot falls back to Nitter RSS when TwitterBridge returns synthetic error items. |
 | RSSBRIDGE__NITTERBASEURL | Optional | Optional | https://nitter.net | https://nitter.net | Base URL for Nitter fallback endpoint. |
-| FEEDPROVIDERS__ENABLEDIRECTRSS | Optional | Optional | true | true | Enables tracking direct RSS URLs (for example FetchRSS). |
-| FEEDPROVIDERS__DEFAULTXPROVIDER | Optional | Optional | RssBridge | RssBridge | Default provider for /add-x command. |
-| FEEDPROVIDERS__DEFAULTFACEBOOKPROVIDER | Optional | Optional | RssBridge | RssBridge | Default provider for /add-fb fanpage/profile command path. |
-| FEEDPROVIDERS__ENABLEFACEBOOKPROFILEALERTS | Optional | Optional | false | true | Enables runtime admin alerts when FB profile feeds show repeated visibility/fetch failures. |
-| FEEDPROVIDERS__FACEBOOKPROFILEALERTCHANNELID | Optional | Optional | 0 | 123456789012345678 | Discord channel ID receiving profile health alerts. 0 disables channel delivery. |
-| FEEDPROVIDERS__FACEBOOKPROFILEFAILURETHRESHOLD | Optional | Optional | 3 | 3 | Number of consecutive profile fetch failures before alerting. |
-| FEEDPROVIDERS__FACEBOOKPROFILEALERTCOOLDOWNMINUTES | Optional | Optional | 180 | 180 | Minimum minutes between repeated alerts for the same profile source. |
-| APIFYFALLBACK__ENABLED | Optional | Optional | false | true | Enables Apify fallback when RSS-Bridge FacebookBridge fails repeatedly. |
-| APIFYFALLBACK__APIBASEURL | Optional | Optional | https://api.apify.com/v2 | https://api.apify.com/v2 | Base URL for Apify API endpoints. |
-| APIFYFALLBACK__APITOKEN | Optional | Optional | empty | apify_api_... | API token for running Apify actor. Keep secret. |
-| APIFYFALLBACK__ACTORID | Optional | Optional | apify/facebook-posts-scraper | apify/facebook-posts-scraper | Actor identifier used for fallback scraping. |
-| APIFYFALLBACK__RESULTSLIMIT | Optional | Optional | 5 | 5 | Maximum items requested per fallback run. |
-| APIFYFALLBACK__REQUESTTIMEOUTSECONDS | Optional | Optional | 45 | 45 | Timeout budget for one fallback run lifecycle. |
-| APIFYFALLBACK__POLLINTERVALSECONDS | Optional | Optional | 5 | 5 | Poll interval for asynchronous actor run status. |
-| APIFYFALLBACK__MAXPOLLATTEMPTS | Optional | Optional | 24 | 24 | Maximum run status poll attempts before aborting fallback. |
-| APIFYFALLBACK__FAILURETHRESHOLD | Optional | Optional | 3 | 3 | Consecutive primary fetch failures required before triggering fallback. |
-| APIFYFALLBACK__COOLDOWNMINUTES | Optional | Optional | 180 | 180 | Minimum minutes between fallback attempts per source. |
-| APIFYFALLBACK__ENABLEFORFANPAGE | Optional | Optional | true | true | Enables Apify fallback for Facebook fanpage sources. |
-| APIFYFALLBACK__ENABLEFORPROFILE | Optional | Optional | true | true | Enables Apify fallback for Facebook profile sources. |
-| RSSBRIDGEFALLBACK__ENABLED | Optional | Optional | false | true | Enables RSS-Bridge priority fallback before Apify for Facebook sources. |
-| RSSBRIDGEFALLBACK__FAILURETHRESHOLD | Optional | Optional | 2 | 2 | Consecutive primary failures required before attempting RSS-Bridge fallback. |
-| RSSBRIDGEFALLBACK__COOLDOWNMINUTES | Optional | Optional | 60 | 60 | Minimum minutes between RSS-Bridge fallback attempts per source. |
-| RSSBRIDGEFALLBACK__ENABLEFORFANPAGE | Optional | Optional | true | true | Enables RSS-Bridge fallback for Facebook fanpage sources. |
-| RSSBRIDGEFALLBACK__ENABLEFORPROFILE | Optional | Optional | false | true | Enables RSS-Bridge fallback for Facebook profile sources. Keep false by default for canary rollout. |
+| FEEDPROVIDERS__ENABLEDIRECTRSS | Optional | Optional | true | true | Enables tracking direct RSS URLs through `/add-link`, including `platform:FB`. |
+| FEEDPROVIDERS__DEFAULTXPROVIDER | Optional | Optional | RssBridge | RssBridge | Default provider for `/add-x`. |
+| APIFY__ENABLED | Yes for `/add-fb` | Yes for `/add-fb` | false | true | Enables Apify as the primary Facebook provider. If false, `/add-fb` rejects new Facebook sources. |
+| APIFY__APIBASEURL | Optional | Optional | https://api.apify.com/v2 | https://api.apify.com/v2 | Base URL for Apify API endpoints. |
+| APIFY__APITOKEN | Yes for `/add-fb` | Yes for `/add-fb` | empty | apify_api_... | API token for running the Facebook actor. Keep secret. |
+| APIFY__ACTORID | Yes for `/add-fb` | Yes for `/add-fb` | apify/facebook-posts-scraper | apify/facebook-posts-scraper | Actor identifier used for Facebook scraping. |
+| APIFY__RESULTSLIMIT | Optional | Optional | 5 | 5 | Maximum items requested per source per polling cycle. |
+| APIFY__REQUESTTIMEOUTSECONDS | Optional | Optional | 45 | 45 | Timeout budget for one actor run lifecycle. |
+| APIFY__POLLINTERVALSECONDS | Optional | Optional | 5 | 5 | Poll interval for asynchronous actor run status. |
+| APIFY__MAXPOLLATTEMPTS | Optional | Optional | 24 | 24 | Maximum run status poll attempts before aborting. |
+| APIFY__ENABLEFORFANPAGE | Optional | Optional | true | true | Enables `/add-fb sourceType:fanpage`. |
+| APIFY__ENABLEFORPROFILE | Optional | Optional | true | true | Enables `/add-fb sourceType:profile`. |
 | POLLING__INTERVALMINUTES | Optional | Optional | 10 | 10 | Polling interval in minutes. |
-| POLLING__MAXITEMSPERFEED | Optional | Optional | 5 | 5 | Max feed items fetched each cycle. |
+| POLLING__MAXITEMSPERFEED | Optional | Optional | 5 | 5 | Max items fetched each cycle. |
 | RETRY__MAXRETRIES | Optional | Optional | 3 | 3 | Retry count for RSS fetch path. |
 | RETRY__PUBLISHMAXRETRIES | Optional | Optional | 2 | 2 | Retry count for Discord publish path. |
 | RETRY__INITIALDELAYSECONDS | Optional | Optional | 2 | 2 | Base delay for exponential backoff. |
@@ -57,11 +45,13 @@ This matrix documents which variables are required for each deployment mode.
 ### docker-prod minimum
 - DISCORD_TOKEN
 - POSTGRES_PASSWORD
+- APIFY__ENABLED=true, APIFY__APITOKEN, and APIFY__ACTORID if using `/add-fb`
 
 ### source-run minimum
 - DISCORD_TOKEN
 - CONNECTIONSTRINGS__DEFAULT
 - RSSBRIDGE__BASEURL
+- APIFY__ENABLED=true, APIFY__APITOKEN, and APIFY__ACTORID if using `/add-fb`
 
 ## Secret Handling
 - Do not commit real secrets in .env files.

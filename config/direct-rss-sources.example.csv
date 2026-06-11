@@ -1,0 +1,2 @@
+Source,RssUrl,Platform,Notes
+nasa,https://www.nasa.gov/rss/dyn/breaking_news.rss,FB,Example direct RSS for testing /add-link flow

@@ -1,4 +1,4 @@
-# ---
+﻿# ---
 
 **Discord Feed Bot (X \+ Facebook)**
 
@@ -14,11 +14,11 @@ Bot hỗ trợ 3 nhóm feed:
 * Facebook feed fanpage/profile (/add-fb)  
 * Direct RSS feed (/add-link)
 
-Bot có fallback runtime cho Facebook:
+Bot dùng Apify làm provider chính cho Facebook:
 
 * **Primary provider**: (Theo feed đã đăng ký)  
-* **RSS-Bridge fallback**: (Ưu tiên trước)  
-* **Apify fallback**: (Layer cuối)
+* **Facebook /add-fb**: Apify primary
+* **Facebook /add-link**: Direct RSS operator cung cấp
 
 Script vận hành đã có sẵn:
 
@@ -44,7 +44,7 @@ Service chính trong docker-compose.yml:
 
 Code chính:
 
-* src/DiscordXBot/Worker.cs: Polling/fetch/fallback/publish  
+* src/DiscordXBot/Worker.cs: Polling/fetch/publish
 * src/DiscordXBot/Discord/Commands/\*.cs: Slash command handlers  
 * src/DiscordXBot/Services/\*.cs: Resolver, RSS clients, publisher, parser
 
@@ -87,10 +87,9 @@ Cập nhật tối thiểu:
 Khuyến nghị cập nhật thêm:
 
 * DISCORD\_GUILD\_ID  
-* FEEDPROVIDERS\_\_DEFAULTFACEBOOKPROVIDER  
-* APIFYFALLBACK\_\_ENABLED  
-* RSSBRIDGEFALLBACK\_\_ENABLED  
-* RSSBRIDGEFALLBACK\_\_ENABLEFORPROFILE
+* APIFY\_\_ENABLED=true  
+* APIFY\_\_APITOKEN  
+* APIFY\_\_ACTORID
 
 **Lưu ý:**
 
@@ -193,13 +192,13 @@ Thêm fanpage:
 
 Plaintext
 
-/add-fb fanpageOrId:000000000000000 channel:\<\#channel\> sourceType:fanpage provider:rssbridge
+/add-fb fanpageOrId:000000000000000 channel:\<\#channel\> sourceType:fanpage
 
 Thêm profile:
 
 Plaintext
 
-/add-fb fanpageOrId:000000000000000 channel:\<\#channel\> sourceType:profile provider:rssbridge
+/add-fb fanpageOrId:000000000000000 channel:\<\#channel\> sourceType:profile
 
 Liệt kê:
 
@@ -217,7 +216,7 @@ Plaintext
 
 * Profile hiện tại ưu tiên ID số (sourceType=profile).  
 * Nếu provider trả lời tạm thời (503/timeout/network), bot vẫn cho add feed và trả về cảnh báo (warning).  
-* Runtime sẽ xử lý tiếp bằng retry/fallback chain.
+* Runtime sẽ xử lý tiếp bằng Apify primary hoặc direct RSS tùy loại feed.
 
 ### **7.3 Direct RSS feeds**
 
@@ -239,41 +238,29 @@ Plaintext
 
 /remove-link rssUrl:https://example.com/feed.xml \[channel:\<\#channel\>\]
 
-## **8\. Cấu hình fallback khuyến nghị**
+## **8. Cấu hình Facebook qua Apify**
 
-### **8.1 Apify fallback**
-
-Cần bật:
-
-* APIFYFALLBACK\_\_ENABLED=true  
-* APIFYFALLBACK\_\_APITOKEN=...  
-* APIFYFALLBACK\_\_ACTORID=apify/facebook-posts-scraper
-
-Khuyến nghị:
-
-* APIFYFALLBACK\_\_FAILURETHRESHOLD=3  
-* APIFYFALLBACK\_\_COOLDOWNMINUTES=180
-
-### **8.2 RSS-Bridge priority fallback**
+### **8.1 Apify primary**
 
 Cần bật:
 
-* RSSBRIDGEFALLBACK\_\_ENABLED=true
+* APIFY__ENABLED=true
+* APIFY__APITOKEN=...
+* APIFY__ACTORID=apify/facebook-posts-scraper
 
 Khuyến nghị:
 
-* RSSBRIDGEFALLBACK\_\_FAILURETHRESHOLD=2  
-* RSSBRIDGEFALLBACK\_\_COOLDOWNMINUTES=60  
-* RSSBRIDGEFALLBACK\_\_ENABLEFORFANPAGE=true  
-* RSSBRIDGEFALLBACK\_\_ENABLEFORPROFILE=true (Canary trước, mở rộng sau)
+* APIFY__RESULTSLIMIT=5
+* APIFY__REQUESTTIMEOUTSECONDS=45
+* APIFY__ENABLEFORFANPAGE=true
+* APIFY__ENABLEFORPROFILE=true
 
 Thứ tự runtime:
 
-1. Primary provider fetch  
-2. RSS-Bridge fallback  
-3. Apify fallback
-
-## **9\. Quy trình verify sau khi add feed**
+1. Facebook `/add-fb`: Apify primary
+2. Facebook `/add-link`: direct RSS URL operator cung cấp
+3. X/Twitter: RSS-Bridge
+## **9. Quy trình verify sau khi add feed**
 
 1. Chạy command trên Discord.  
 2. Kiểm tra xem đã có mapping chưa:
@@ -289,8 +276,7 @@ PowerShell
 docker compose \-\-profile prod logs \-f bot
 
 4. Tìm các marker quan trọng:  
-* Using RSS-Bridge fallback for source ...  
-* Using Apify fallback for source ...  
+* Apify retrieved ...  
 * Published tweet ...  
 * Polling cycle done ...
 
@@ -310,6 +296,37 @@ PowerShell
 
 .\\scripts\\precheck\-fanpages.ps1 \-FanpageSources 10150123547145211,100071458686024
 
+Precheck recommendation notes:
+
+* `use-add-fb`: Apify config is present and source is suitable for `/add-fb`.
+* `use-add-link`: source has a mapped direct RSS URL and can use `/add-link`.
+* `fix-direct-rss`: source has a mapped direct RSS URL, but that URL failed validation.
+* `configure-apify`: Apify env is missing or disabled.
+* `invalid-source`: source input cannot be normalized.
+
+Facebook source onboarding decision tree:
+
+1. Add known direct RSS URLs to `config/direct-rss-sources.local.csv` using columns `Source,RssUrl,Platform,Notes`.
+2. Run `.\scripts\precheck-fanpages.ps1 -FanpageSources <source> -DirectRssMapFile .\config\direct-rss-sources.local.csv -ValidateDirectRss`.
+3. If the result is `use-add-fb`, run `/add-fb fanpageOrId:<source> channel:<#channel> sourceType:fanpage`.
+4. If the result is `use-add-link`, run the concrete `/add-link` command printed by the script.
+5. If the result is `configure-apify`, set `APIFY__ENABLED=true`, `APIFY__APITOKEN`, and `APIFY__ACTORID`, or add a direct RSS map entry.
+6. If the result is `fix-direct-rss`, update the mapped RSS URL before running `/add-link`.
+Direct RSS validation checklist:
+
+* Open the RSS URL in a browser or run `Invoke-WebRequest <direct-rss-url>`.
+* Confirm HTTP 200.
+* Confirm the XML contains real `<item>` or `<entry>` posts, not an error page.
+* Acceptable origins include official website RSS, FetchRSS, RSS.app, or another generated RSS provider.
+* Do not commit private generated RSS URLs or provider credentials.
+* Keep private mappings in `config/direct-rss-sources.local.csv`; use `config/direct-rss-sources.example.csv` as the tracked template.
+
+Facebook provider policy:
+
+* RSS-Bridge is no longer used for Facebook.
+* Do not configure Facebook cookies for RSS-Bridge.
+* Use Apify for `/add-fb` and `/add-link platform:FB` for operator-provided direct RSS.
+
 ### **10.3 Checklist release**
 
 PowerShell
@@ -321,20 +338,20 @@ docker compose \-\-profile prod up \-d \-\-build
 
 ## **11\. Troubleshooting nhanh**
 
-### **11.1 /add-fb báo HTTP 503**
+### **11.1 /add-fb báo thiếu Apify config**
 
 Trạng thái mới:
 
-* Command có thể vẫn add được feed nếu lỗi là tạm thời (5xx/timeout/network).  
-* Nếu vẫn fail, thử:  
-  1. Kiểm tra RSS-Bridge service:
+* `/add-fb` yêu cầu `APIFY__ENABLED=true`, `APIFY__APITOKEN`, và `APIFY__ACTORID`.
+* RSS-Bridge không còn nằm trong luồng Facebook.
+* Nếu chưa muốn dùng Apify cho source đó, dùng `/add-link platform:FB` với một direct RSS URL đã kiểm tra.
 
-  PowerShell  
-     docker compose \-\-profile prod ps  
-     docker compose \-\-profile prod logs \-\-since 10m rss\-bridge
+Kiểm tra nhanh:
 
-  3. Dùng precheck-fanpages.ps1 để phân loại source.
+PowerShell
 
+.\scripts\preflight.ps1 -EnvFile .env
+.\scripts\precheck-fanpages.ps1 -FanpageSources <source> -EnvFile .env
 ### **11.2 Không thấy slash command**
 
 1. Kiểm tra DISCORD\_GUILD\_ID.  
@@ -349,7 +366,7 @@ docker compose \-\-profile prod restart bot
 
 1. Kiểm tra processed\_tweets có bị trùng (duplicate) không.  
 2. Kiểm tra media policy và parser output.  
-3. Kiểm tra fallback marker trong log.
+3. Kiểm tra log fetch/publish marker.
 
 ## **12\. Bảo mật**
 
@@ -381,4 +398,8 @@ Nếu cần, bước tiếp theo bạn nên tạo thêm:
 
 1. README-OPERATIONS.md: Cho on-call/incident.  
 2. README-COMMANDS.md: Gồm screenshot các slash command thực tế.  
-3. README-ARCHITECTURE.md: Cho luồng dữ liệu và fallback diagram.
+3. README-ARCHITECTURE.md: Cho luồng dữ liệu và provider diagram.
+
+
+
+

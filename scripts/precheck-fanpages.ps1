@@ -1,10 +1,11 @@
 param(
-    [string]$ComposeMode = "prod",
-    [string]$RssBridgeBaseUrl = "http://localhost:3000",
     [string[]]$FanpageSources,
     [string]$FanpageSourcesFile,
+    [string]$DirectRssMapFile,
+    [string]$EnvFile = ".env",
+    [string]$SourceType = "fanpage",
     [int]$TimeoutSec = 60,
-    [switch]$SkipDockerCheck,
+    [switch]$ValidateDirectRss,
     [switch]$FailOnUnusable
 )
 
@@ -15,6 +16,23 @@ function Pass([string]$msg) { Write-Host "[OK] $msg" -ForegroundColor Green }
 function Warn([string]$msg) { Write-Host "[WARN] $msg" -ForegroundColor Yellow }
 function Fail([string]$msg) { Write-Host "[FAIL] $msg" -ForegroundColor Red; $script:failed++ }
 function Info([string]$msg) { Write-Host "[INFO] $msg" -ForegroundColor Cyan }
+
+function Parse-EnvFile {
+    param([string]$Path)
+
+    $map = @{}
+    if (-not (Test-Path $Path)) { return $map }
+
+    Get-Content $Path | ForEach-Object {
+        $line = $_.Trim()
+        if ([string]::IsNullOrWhiteSpace($line) -or $line.StartsWith("#")) { return }
+        if ($line -match '^([^=]+)=(.*)$') {
+            $map[$matches[1].Trim()] = $matches[2].Trim()
+        }
+    }
+
+    return $map
+}
 
 function ConvertTo-FanpageSourceKey {
     param([string]$InputValue)
@@ -91,197 +109,194 @@ function Get-InputSources {
     return @($sourceSet)
 }
 
-function Get-EntryCountFallback {
-    param([string]$Content)
+function Get-DirectRssMap {
+    param([string]$Path)
 
-    return ([regex]::Matches($Content, '<entry(\s|>)', [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)).Count
+    $map = @{}
+    if ([string]::IsNullOrWhiteSpace($Path)) {
+        return $map
+    }
+
+    if (-not (Test-Path $Path)) {
+        throw "Direct RSS map file not found: $Path"
+    }
+
+    $rows = Import-Csv -Path $Path
+    foreach ($row in $rows) {
+        $source = ConvertTo-FanpageSourceKey -InputValue ([string]$row.Source)
+        $rssUrl = ([string]$row.RssUrl).Trim()
+        $platform = ([string]$row.Platform).Trim()
+
+        if ([string]::IsNullOrWhiteSpace($source) -or [string]::IsNullOrWhiteSpace($rssUrl)) {
+            continue
+        }
+
+        if (-not [string]::IsNullOrWhiteSpace($platform) -and
+            $platform -ne "FB" -and
+            $platform -ne "Facebook") {
+            continue
+        }
+
+        $map[$source.ToLowerInvariant()] = $rssUrl
+    }
+
+    return $map
 }
 
-function Test-FanpageSource {
+function Test-DirectRssUrl {
     param(
-        [string]$InputSource,
-        [string]$BaseUrl,
+        [string]$RssUrl,
         [int]$RequestTimeoutSec
     )
 
-    $normalizedSource = ConvertTo-FanpageSourceKey -InputValue $InputSource
-    if ([string]::IsNullOrWhiteSpace($normalizedSource)) {
-        return [pscustomobject]@{
-            InputSource = $InputSource
-            SourceKey = ""
-            HttpStatus = "n/a"
-            TotalEntries = 0
-            ErrorEntries = 0
-            UsableEntries = 0
-            Recommendation = "invalid-source"
-            Note = "Cannot normalize fanpage source"
-        }
+    $uri = $null
+    if (-not [Uri]::TryCreate($RssUrl, [UriKind]::Absolute, [ref]$uri)) {
+        return [pscustomobject]@{ IsValid = $false; Note = "Mapped direct RSS URL is not absolute" }
     }
 
-    $encodedSource = [Uri]::EscapeDataString($normalizedSource)
-    $url = "$BaseUrl/?action=display&bridge=FacebookBridge&context=User&u=$encodedSource&media_type=all&format=Atom"
+    if ($uri.Scheme -ne "http" -and $uri.Scheme -ne "https") {
+        return [pscustomobject]@{ IsValid = $false; Note = "Mapped direct RSS URL must use http/https" }
+    }
 
     try {
-        $response = Invoke-WebRequest -Uri $url -TimeoutSec $RequestTimeoutSec -UseBasicParsing
-        $content = $response.Content
-        $statusCode = [string]$response.StatusCode
-        $hasPayloadErrorMarker = $content -match 'Bridge returned error|Unable to find anything useful|Exception'
-
-        $totalEntries = 0
-        $errorEntries = 0
-
-        try {
-            [xml]$xml = $content
-            $entries = @($xml.feed.entry)
-            $totalEntries = $entries.Count
-
-            foreach ($entry in $entries) {
-                $entryText = ""
-                if ($null -ne $entry.title) { $entryText += " " + [string]$entry.title.InnerText }
-                if ($null -ne $entry.summary) { $entryText += " " + [string]$entry.summary.InnerText }
-                if ($null -ne $entry.content) { $entryText += " " + [string]$entry.content.InnerText }
-
-                if ($entryText -match 'Bridge returned error|Unable to find anything useful|Exception') {
-                    $errorEntries++
-                }
-            }
-
-            if ($hasPayloadErrorMarker -and $errorEntries -eq 0) {
-                $errorEntries = [Math]::Max(1, $totalEntries)
-            }
-        }
-        catch {
-            $totalEntries = Get-EntryCountFallback -Content $content
-            if ($hasPayloadErrorMarker) {
-                $errorEntries = [Math]::Max(1, $totalEntries)
-            }
+        $response = Invoke-WebRequest -Uri $RssUrl -TimeoutSec $RequestTimeoutSec -UseBasicParsing
+        if ($response.StatusCode -lt 200 -or $response.StatusCode -ge 300) {
+            return [pscustomobject]@{ IsValid = $false; Note = "Mapped direct RSS returned HTTP $($response.StatusCode)" }
         }
 
-        $usableEntries = [Math]::Max(0, $totalEntries - $errorEntries)
-
-        $recommendation = "needs-review"
-        $note = "Feed reachable"
-
-        if ($usableEntries -gt 0) {
-            $recommendation = "use-add-fb"
-            $note = "RSS-Bridge has usable entries"
-        }
-        elseif ($totalEntries -gt 0 -and $errorEntries -ge $totalEntries) {
-            $recommendation = "prefer-add-link"
-            $note = "Only bridge error entries found"
-        }
-        elseif ($hasPayloadErrorMarker) {
-            $recommendation = "prefer-add-link"
-            $note = "Bridge returned parser error markers"
-        }
-        elseif ($totalEntries -eq 0) {
-            $recommendation = "retry-later"
-            $note = "No entries currently available"
+        [xml]$xml = $response.Content
+        $entryCount = $xml.SelectNodes("//*[local-name()='item' or local-name()='entry']").Count
+        if ($entryCount -le 0) {
+            return [pscustomobject]@{ IsValid = $false; Note = "Mapped direct RSS has no item/entry elements" }
         }
 
-        return [pscustomobject]@{
-            InputSource = $InputSource
-            SourceKey = $normalizedSource
-            HttpStatus = $statusCode
-            TotalEntries = $totalEntries
-            ErrorEntries = $errorEntries
-            UsableEntries = $usableEntries
-            Recommendation = $recommendation
-            Note = $note
-        }
+        return [pscustomobject]@{ IsValid = $true; Note = "Mapped direct RSS validated" }
     }
     catch {
-        $statusText = "request-failed"
-        if ($_.Exception.Response -and $_.Exception.Response.StatusCode) {
-            $statusText = [string]$_.Exception.Response.StatusCode
-        }
-
-        return [pscustomobject]@{
-            InputSource = $InputSource
-            SourceKey = $normalizedSource
-            HttpStatus = $statusText
-            TotalEntries = 0
-            ErrorEntries = 0
-            UsableEntries = 0
-            Recommendation = "check-rss-bridge"
-            Note = $_.Exception.Message
-        }
+        return [pscustomobject]@{ IsValid = $false; Note = "Mapped direct RSS validation failed: $($_.Exception.Message)" }
     }
 }
 
-Info "Facebook fanpage source pre-check started"
+function Test-ApifyReady {
+    param([hashtable]$EnvMap, [string]$RequestedSourceType)
 
-if (-not $SkipDockerCheck) {
-    try {
-        $status = (& docker compose --profile $ComposeMode ps rss-bridge 2>&1 | Out-String)
-        if ($LASTEXITCODE -ne 0 -or $status -match 'error during connect') {
-            Warn "Could not verify docker compose status for rss-bridge. Continuing with direct HTTP checks."
+    $enabled = $EnvMap.ContainsKey("APIFY__ENABLED") -and $EnvMap["APIFY__ENABLED"].ToLowerInvariant() -eq "true"
+    $hasToken = $EnvMap.ContainsKey("APIFY__APITOKEN") -and -not [string]::IsNullOrWhiteSpace($EnvMap["APIFY__APITOKEN"])
+    $hasActor = $EnvMap.ContainsKey("APIFY__ACTORID") -and -not [string]::IsNullOrWhiteSpace($EnvMap["APIFY__ACTORID"])
+
+    $fanpageEnabled = -not $EnvMap.ContainsKey("APIFY__ENABLEFORFANPAGE") -or $EnvMap["APIFY__ENABLEFORFANPAGE"].ToLowerInvariant() -eq "true"
+    $profileEnabled = -not $EnvMap.ContainsKey("APIFY__ENABLEFORPROFILE") -or $EnvMap["APIFY__ENABLEFORPROFILE"].ToLowerInvariant() -eq "true"
+    $sourceTypeEnabled = if ($RequestedSourceType -eq "profile") { $profileEnabled } else { $fanpageEnabled }
+
+    return $enabled -and $hasToken -and $hasActor -and $sourceTypeEnabled
+}
+
+$normalizedSourceType = $SourceType.Trim().ToLowerInvariant()
+if ($normalizedSourceType -eq "page") { $normalizedSourceType = "fanpage" }
+if ($normalizedSourceType -eq "personal" -or $normalizedSourceType -eq "personalprofile") { $normalizedSourceType = "profile" }
+if ($normalizedSourceType -ne "fanpage" -and $normalizedSourceType -ne "profile") {
+    throw "Unsupported SourceType '$SourceType'. Use fanpage or profile."
+}
+
+$envMap = Parse-EnvFile -Path $EnvFile
+$apifyReady = Test-ApifyReady -EnvMap $envMap -RequestedSourceType $normalizedSourceType
+$directRssMap = Get-DirectRssMap -Path $DirectRssMapFile
+$sources = Get-InputSources
+
+if ($sources.Count -eq 0) {
+    throw "No fanpage sources provided. Use -FanpageSources or -FanpageSourcesFile."
+}
+
+Info "Facebook onboarding precheck uses Apify primary for /add-fb and optional direct RSS mapping for /add-link."
+if ($apifyReady) {
+    Pass "APIFY__* configuration is ready for /add-fb."
+}
+else {
+    Warn "APIFY__* configuration is missing, disabled, or disabled for source type '$normalizedSourceType'."
+}
+
+$results = @()
+foreach ($source in $sources) {
+    $sourceKey = ConvertTo-FanpageSourceKey -InputValue $source
+    if ([string]::IsNullOrWhiteSpace($sourceKey)) {
+        $results += [pscustomobject]@{
+            Source = $source
+            SourceKey = ""
+            Recommendation = "invalid-source"
+            DirectRssUrl = ""
+            Note = "Source could not be normalized"
+        }
+        continue
+    }
+
+    $mappedUrl = ""
+    $mapKey = $sourceKey.ToLowerInvariant()
+    if ($directRssMap.ContainsKey($mapKey)) {
+        $mappedUrl = $directRssMap[$mapKey]
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($mappedUrl)) {
+        if ($ValidateDirectRss) {
+            $validation = Test-DirectRssUrl -RssUrl $mappedUrl -RequestTimeoutSec $TimeoutSec
+            $recommendation = if ($validation.IsValid) { "use-add-link" } else { "fix-direct-rss" }
+            $note = $validation.Note
         }
         else {
-            Pass "docker compose status check completed for rss-bridge"
+            $recommendation = "use-add-link"
+            $note = "Mapped direct RSS available; validation skipped"
         }
     }
-    catch {
-        Warn "Could not verify docker compose status for rss-bridge. Continuing with direct HTTP checks."
+    elseif ($apifyReady) {
+        $recommendation = "use-add-fb"
+        $note = "Apify primary is configured"
+    }
+    else {
+        $recommendation = "configure-apify"
+        $note = "Set APIFY__ENABLED=true, APIFY__APITOKEN, and APIFY__ACTORID, or provide a direct RSS map"
+    }
+
+    $results += [pscustomobject]@{
+        Source = $source
+        SourceKey = $sourceKey
+        Recommendation = $recommendation
+        DirectRssUrl = $mappedUrl
+        Note = $note
     }
 }
 
-$sources = Get-InputSources
-if (-not $sources -or $sources.Count -eq 0) {
-    Fail "No fanpage sources provided. Use -FanpageSources and/or -FanpageSourcesFile."
-    Write-Host "Example: .\scripts\precheck-fanpages.ps1 -FanpageSources 10150123547145211,100071458686024" -ForegroundColor Yellow
-    exit 1
-}
+$results | Format-Table Source, SourceKey, Recommendation, DirectRssUrl, Note -AutoSize
 
-Info "Running checks for $($sources.Count) source(s) against $RssBridgeBaseUrl"
-
-$results = foreach ($source in $sources) {
-    Test-FanpageSource -InputSource $source -BaseUrl $RssBridgeBaseUrl -RequestTimeoutSec $TimeoutSec
-}
-
-$results | Sort-Object Recommendation, SourceKey | Format-Table SourceKey, HttpStatus, TotalEntries, ErrorEntries, UsableEntries, Recommendation, Note -AutoSize
-
-$usableCount = ($results | Where-Object { $_.Recommendation -eq 'use-add-fb' }).Count
-$preferLinkCount = ($results | Where-Object { $_.Recommendation -eq 'prefer-add-link' }).Count
-$retryCount = ($results | Where-Object { $_.Recommendation -eq 'retry-later' }).Count
-$invalidCount = ($results | Where-Object { $_.Recommendation -eq 'invalid-source' }).Count
-$checkBridgeCount = ($results | Where-Object { $_.Recommendation -eq 'check-rss-bridge' }).Count
-
-Write-Host "Summary: use-add-fb=$usableCount, prefer-add-link=$preferLinkCount, retry-later=$retryCount, invalid-source=$invalidCount, check-rss-bridge=$checkBridgeCount" -ForegroundColor Cyan
-
-$useAddFbGroup = $results | Where-Object { $_.Recommendation -eq 'use-add-fb' } | Sort-Object SourceKey
-$preferAddLinkGroup = $results | Where-Object { $_.Recommendation -eq 'prefer-add-link' } | Sort-Object SourceKey
-
-if ($useAddFbGroup.Count -gt 0 -or $preferAddLinkGroup.Count -gt 0) {
-    Write-Host "" 
-    Write-Host "Suggested command plan by source:" -ForegroundColor Cyan
-}
-
-if ($useAddFbGroup.Count -gt 0) {
-    Write-Host "[Group: use-add-fb]" -ForegroundColor Green
-    foreach ($item in $useAddFbGroup) {
-        Write-Host "/add-fb fanpage_or_id:$($item.SourceKey) channel:<target-channel> provider:rssbridge source_type:fanpage"
+Write-Host ""
+Write-Host "Suggested commands:" -ForegroundColor Cyan
+foreach ($item in $results) {
+    switch ($item.Recommendation) {
+        "use-add-fb" {
+            Write-Host "/add-fb fanpage_or_id:$($item.SourceKey) channel:<target-channel> source_type:$normalizedSourceType"
+        }
+        "use-add-link" {
+            Write-Host "/add-link rss_url:$($item.DirectRssUrl) platform:FB channel:<target-channel>"
+        }
+        "fix-direct-rss" {
+            Warn "$($item.SourceKey): mapped direct RSS failed validation. Fix map entry before using /add-link."
+        }
+        "configure-apify" {
+            Warn "$($item.SourceKey): configure APIFY__* before using /add-fb, or add a valid direct RSS map entry."
+        }
+        "invalid-source" {
+            Warn "$($item.Source): invalid source input."
+        }
     }
 }
 
-if ($preferAddLinkGroup.Count -gt 0) {
-    Write-Host "[Group: prefer-add-link]" -ForegroundColor Yellow
-    foreach ($item in $preferAddLinkGroup) {
-        Write-Host "/add-link rss_url:<direct-rss-url-for-$($item.SourceKey)> platform:FB channel:<target-channel>"
-    }
-}
-
-if ($FailOnUnusable) {
-    $unusableCount = ($results | Where-Object { $_.Recommendation -ne 'use-add-fb' }).Count
-    if ($unusableCount -gt 0) {
-        Fail "FailOnUnusable enabled and found $unusableCount non-usable source(s)."
-    }
+$unusable = @($results | Where-Object { $_.Recommendation -in @("invalid-source", "configure-apify", "fix-direct-rss") })
+if ($unusable.Count -gt 0 -and $FailOnUnusable) {
+    $failed += $unusable.Count
 }
 
 if ($failed -gt 0) {
-    Write-Host "Fanpage pre-check finished with $failed failure(s)." -ForegroundColor Red
+    Write-Host "Precheck finished with $failed unusable source(s)." -ForegroundColor Red
     exit 1
 }
 
-Write-Host "Fanpage pre-check completed." -ForegroundColor Green
+Write-Host "Precheck finished." -ForegroundColor Green
 exit 0

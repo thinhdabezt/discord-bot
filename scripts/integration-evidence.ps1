@@ -140,7 +140,7 @@ if ($failed -eq 0 -and -not [string]::IsNullOrWhiteSpace($FanpageSource)) {
     }
     else {
         $fanpageSqlValue = ConvertTo-SqlLiteral $normalizedFanpage
-        $fanpageSql = "SELECT COUNT(*) FROM tracked_feeds t WHERE (to_jsonb(t)->>'Platform')::int = 1 AND (to_jsonb(t)->>'SourceType')::int = $sourceTypeValue AND (to_jsonb(t)->>'Provider')::int = 0 AND lower(to_jsonb(t)->>'SourceKey') = lower('$fanpageSqlValue');"
+        $fanpageSql = "SELECT COUNT(*) FROM tracked_feeds t WHERE (to_jsonb(t)->>'Platform')::int = 1 AND (to_jsonb(t)->>'SourceType')::int = $sourceTypeValue AND (to_jsonb(t)->>'Provider')::int = 3 AND lower(to_jsonb(t)->>'SourceKey') = lower('$fanpageSqlValue');"
         $fanpageCountText = Invoke-DbSql -User $postgresUser -Database $postgresDb -Sql $fanpageSql
         $fanpageText = ($fanpageCountText | Out-String)
 

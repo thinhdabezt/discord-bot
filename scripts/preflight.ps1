@@ -8,6 +8,7 @@ $failed = 0
 function Pass([string]$msg) { Write-Host "[OK] $msg" -ForegroundColor Green }
 function Fail([string]$msg) { Write-Host "[FAIL] $msg" -ForegroundColor Red; $script:failed++ }
 function Info([string]$msg) { Write-Host "[INFO] $msg" -ForegroundColor Cyan }
+function Warn([string]$msg) { Write-Host "[WARN] $msg" -ForegroundColor Yellow }
 
 function Parse-EnvFile {
     param([string]$Path)
@@ -81,59 +82,28 @@ foreach ($name in $recommendedVars) {
     }
 }
 
-$enableProfileAlerts = $false
-if ($envMap.ContainsKey("FEEDPROVIDERS__ENABLEFACEBOOKPROFILEALERTS")) {
-    $enableProfileAlerts = $envMap["FEEDPROVIDERS__ENABLEFACEBOOKPROFILEALERTS"].ToLowerInvariant() -eq "true"
+$enableApify = $false
+if ($envMap.ContainsKey("APIFY__ENABLED")) {
+    $enableApify = $envMap["APIFY__ENABLED"].ToLowerInvariant() -eq "true"
 }
 
-$enableApifyFallback = $false
-if ($envMap.ContainsKey("APIFYFALLBACK__ENABLED")) {
-    $enableApifyFallback = $envMap["APIFYFALLBACK__ENABLED"].ToLowerInvariant() -eq "true"
-}
-
-$enableRssBridgeFallback = $false
-if ($envMap.ContainsKey("RSSBRIDGEFALLBACK__ENABLED")) {
-    $enableRssBridgeFallback = $envMap["RSSBRIDGEFALLBACK__ENABLED"].ToLowerInvariant() -eq "true"
-}
-
-if ($enableProfileAlerts) {
-    if ($envMap.ContainsKey("FEEDPROVIDERS__FACEBOOKPROFILEALERTCHANNELID") -and
-        -not [string]::IsNullOrWhiteSpace($envMap["FEEDPROVIDERS__FACEBOOKPROFILEALERTCHANNELID"]) -and
-        $envMap["FEEDPROVIDERS__FACEBOOKPROFILEALERTCHANNELID"] -ne "0") {
-        Pass "Profile alerts enabled and FEEDPROVIDERS__FACEBOOKPROFILEALERTCHANNELID is set"
+if ($enableApify) {
+    if ($envMap.ContainsKey("APIFY__APITOKEN") -and -not [string]::IsNullOrWhiteSpace($envMap["APIFY__APITOKEN"])) {
+        Pass "Apify primary enabled and APIFY__APITOKEN is set"
     }
     else {
-        Fail "Profile alerts enabled but FEEDPROVIDERS__FACEBOOKPROFILEALERTCHANNELID is missing or 0"
+        Fail "Apify primary enabled but APIFY__APITOKEN is missing"
     }
-}
 
-if ($enableApifyFallback) {
-    if ($envMap.ContainsKey("APIFYFALLBACK__APITOKEN") -and -not [string]::IsNullOrWhiteSpace($envMap["APIFYFALLBACK__APITOKEN"])) {
-        Pass "Apify fallback enabled and APIFYFALLBACK__APITOKEN is set"
+    if ($envMap.ContainsKey("APIFY__ACTORID") -and -not [string]::IsNullOrWhiteSpace($envMap["APIFY__ACTORID"])) {
+        Pass "Apify actor id is set"
     }
     else {
-        Fail "Apify fallback enabled but APIFYFALLBACK__APITOKEN is missing"
-    }
-
-    if ($envMap.ContainsKey("APIFYFALLBACK__ACTORID") -and -not [string]::IsNullOrWhiteSpace($envMap["APIFYFALLBACK__ACTORID"])) {
-        Pass "Apify fallback actor id is set"
-    }
-    else {
-        Fail "Apify fallback enabled but APIFYFALLBACK__ACTORID is missing"
+        Fail "Apify primary enabled but APIFY__ACTORID is missing"
     }
 }
-
-if ($enableRssBridgeFallback) {
-    Info "RSS-Bridge priority fallback is enabled"
-
-    $enableRssBridgeFallbackForProfile = $false
-    if ($envMap.ContainsKey("RSSBRIDGEFALLBACK__ENABLEFORPROFILE")) {
-        $enableRssBridgeFallbackForProfile = $envMap["RSSBRIDGEFALLBACK__ENABLEFORPROFILE"].ToLowerInvariant() -eq "true"
-    }
-
-    if ($enableRssBridgeFallbackForProfile) {
-        Info "RSSBRIDGEFALLBACK__ENABLEFORPROFILE=true (profile path enabled). Run canary monitoring for profile error-only rates."
-    }
+else {
+    Warn "APIFY__ENABLED is not true; /add-fb will reject new Facebook sources. /add-link remains available for direct RSS."
 }
 
 $portChecks = @(3000, 55432)

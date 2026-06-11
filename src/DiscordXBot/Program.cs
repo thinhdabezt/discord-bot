@@ -30,12 +30,8 @@ builder.Services
 	.Bind(builder.Configuration.GetSection(FeedProviderOptions.SectionName));
 
 builder.Services
-	.AddOptions<ApifyFallbackOptions>()
-	.Bind(builder.Configuration.GetSection(ApifyFallbackOptions.SectionName));
-
-builder.Services
-	.AddOptions<RssBridgeFallbackOptions>()
-	.Bind(builder.Configuration.GetSection(RssBridgeFallbackOptions.SectionName));
+	.AddOptions<ApifyOptions>()
+	.Bind(builder.Configuration.GetSection(ApifyOptions.SectionName));
 
 builder.Services
 	.AddOptions<PollingOptions>()
@@ -79,6 +75,7 @@ builder.Services.AddSingleton(provider =>
 builder.Services.AddSingleton<RssBridgeClient>();
 builder.Services.AddSingleton<ApifyFacebookClient>();
 builder.Services.AddSingleton<FeedUrlResolver>();
+builder.Services.AddSingleton<RssFeedValidator>();
 builder.Services.AddSingleton<TweetContentParser>();
 builder.Services.AddSingleton<DiscordPublisher>();
 

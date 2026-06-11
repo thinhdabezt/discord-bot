@@ -249,4 +249,22 @@ public class TweetContentParserTests
         Assert.Empty(result.ImageUrls);
         Assert.Equal(ParsedMediaType.CaptionOnly, result.MediaType);
     }
+
+    [Fact]
+    public void Parse_Instagram_PreservesCaptionAndImage()
+    {
+        var post = new RssPost(
+            TweetId: "ig-1",
+            Url: "https://www.instagram.com/p/example/",
+            Title: "Behind the scenes",
+            SummaryHtml: "<p>Behind the scenes</p><img src='https://scontent.cdninstagram.com/v/t51.2885-15/example.jpg?stp=dst-jpg_e35' />",
+            PublishedAtUtc: DateTime.UtcNow);
+
+        var result = _parser.Parse(post, FeedPlatform.Instagram);
+
+        Assert.Equal("Behind the scenes", result.Caption);
+        Assert.Single(result.ImageUrls);
+        Assert.Equal("https://scontent.cdninstagram.com/v/t51.2885-15/example.jpg?stp=dst-jpg_e35", result.ImageUrls[0]);
+        Assert.Equal(ParsedMediaType.ImageOnly, result.MediaType);
+    }
 }

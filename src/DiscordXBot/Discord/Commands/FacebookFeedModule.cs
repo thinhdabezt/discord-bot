@@ -1,6 +1,4 @@
 using System.Text.RegularExpressions;
-using System.ServiceModel.Syndication;
-using System.Xml;
 using Discord;
 using Discord.Interactions;
 using Discord.WebSocket;
@@ -16,22 +14,19 @@ namespace DiscordXBot.Discord.Commands;
 
 public sealed class FacebookFeedModule(
     BotDbContext db,
-    IHttpClientFactory httpClientFactory,
-    IOptions<RetryOptions> retryOptions,
+    IOptionsMonitor<ApifyOptions> apifyOptions,
     FeedUrlResolver feedUrlResolver,
     ILogger<FacebookFeedModule> logger) : InteractionModuleBase<SocketInteractionContext>
 {
     private readonly BotDbContext _db = db;
-    private readonly IHttpClientFactory _httpClientFactory = httpClientFactory;
-    private readonly IOptions<RetryOptions> _retryOptions = retryOptions;
+    private readonly IOptionsMonitor<ApifyOptions> _apifyOptions = apifyOptions;
     private readonly FeedUrlResolver _feedUrlResolver = feedUrlResolver;
     private readonly ILogger<FacebookFeedModule> _logger = logger;
 
-    [SlashCommand("add-fb", "Add a Facebook feed (fanpage/profile) to a Discord channel")]
+    [SlashCommand("add-fb", "Add a Facebook feed (fanpage/profile) to a Discord channel via Apify")]
     public async Task AddFacebookAsync(
         string fanpageOrId,
         ITextChannel channel,
-        string? provider = null,
         string sourceType = "fanpage")
     {
         if (!TryValidateGuildContext(out var guildUser))
@@ -49,12 +44,6 @@ public sealed class FacebookFeedModule(
         if (channel.GuildId != Context.Guild.Id)
         {
             await ReplyAsync("Target channel must belong to this guild.");
-            return;
-        }
-
-        if (string.IsNullOrWhiteSpace(provider) && ParseProvider(fanpageOrId) is not null)
-        {
-            await ReplyAsync("It looks like you entered provider value in the fanpage/id field. Put your fanpage handle or page ID in fanpage/id, and set provider separately (for example: rssbridge).", ephemeral: true);
             return;
         }
 
@@ -77,47 +66,32 @@ public sealed class FacebookFeedModule(
             return;
         }
 
-        var sourceTypeLabel = GetSourceTypeLabel(selectedSourceType);
-        var selectedProvider = ParseProvider(provider) ?? _feedUrlResolver.GetDefaultProvider(FeedPlatform.Facebook);
-        if (selectedProvider == FeedProvider.DirectRss)
+        var apifyValidation = ValidateApifyConfiguration(selectedSourceType);
+        if (!apifyValidation.IsValid)
         {
-            await ReplyAsync("/add-fb supports RSS-Bridge feeds. Use /add-link for direct RSS URLs.");
-            return;
-        }
-
-        if (!_feedUrlResolver.IsProviderEnabled(selectedProvider))
-        {
-            await ReplyAsync($"Provider {selectedProvider} is disabled by configuration.");
+            await ReplyAsync(apifyValidation.Message);
             return;
         }
 
         await EnsureDeferredAsync();
 
-        string rssUrl;
+        string facebookUrl;
         try
         {
-            rssUrl = _feedUrlResolver.Resolve(FeedPlatform.Facebook, selectedProvider, sourceKey, selectedSourceType);
+            facebookUrl = _feedUrlResolver.Resolve(
+                FeedPlatform.Facebook,
+                FeedProvider.Apify,
+                sourceKey,
+                selectedSourceType);
         }
         catch (Exception ex)
         {
             _logger.LogWarning(
                 ex,
-                "Failed to resolve Facebook {SourceType} RSS URL for source {SourceKey}",
-                sourceTypeLabel,
+                "Failed to resolve Facebook URL for {SourceType} source {SourceKey}",
+                GetSourceTypeLabel(selectedSourceType),
                 sourceKey);
-            await ReplyAsync("Unable to construct RSS URL from current provider settings.");
-            return;
-        }
-
-        var validation = await ValidateRssAsync(rssUrl, selectedProvider, selectedSourceType);
-        if (!validation.IsValid)
-        {
-            var suggestion = validation.PreferAddLink
-                ? $"Command plan for {sourceKey}: prefer /add-link with platform FB and a direct RSS URL to channel {channel.Mention}."
-                : "Command plan: retry /add-fb later for this source.";
-
-            await ReplyAsync(
-                $"Unable to validate Facebook {sourceTypeLabel} feed for {sourceKey}. {validation.Reason} {suggestion}");
+            await ReplyAsync("Unable to construct Facebook URL from current provider settings.");
             return;
         }
 
@@ -144,8 +118,8 @@ public sealed class FacebookFeedModule(
             SourceKey = sourceKey,
             Platform = FeedPlatform.Facebook,
             SourceType = selectedSourceType,
-            Provider = selectedProvider,
-            RssUrl = rssUrl,
+            Provider = FeedProvider.Apify,
+            RssUrl = facebookUrl,
             IsActive = true,
             CreatedAtUtc = DateTime.UtcNow,
             UpdatedAtUtc = DateTime.UtcNow
@@ -162,13 +136,7 @@ public sealed class FacebookFeedModule(
             return;
         }
 
-        var addedMessage = $"Added Facebook {sourceTypeLabel} {sourceKey} to {channel.Mention} via {selectedProvider}.";
-        if (!string.IsNullOrWhiteSpace(validation.Warning))
-        {
-            addedMessage += $"\nNote: {validation.Warning}";
-        }
-
-        await ReplyAsync(addedMessage);
+        await ReplyAsync($"Added Facebook {GetSourceTypeLabel(selectedSourceType)} {sourceKey} to {channel.Mention} via Apify.");
     }
 
     [SlashCommand("list-fb", "List tracked Facebook feeds in this guild")]
@@ -185,7 +153,11 @@ public sealed class FacebookFeedModule(
         var guildId = unchecked((long)Context.Guild.Id);
         var feeds = await _db.TrackedFeeds
             .AsNoTracking()
-            .Where(x => x.GuildId == guildId && x.IsActive && x.Platform == FeedPlatform.Facebook)
+            .Where(x =>
+                x.GuildId == guildId &&
+                x.IsActive &&
+                x.Platform == FeedPlatform.Facebook &&
+                x.Provider == FeedProvider.Apify)
             .OrderBy(x => x.SourceKey)
             .ThenBy(x => x.ChannelId)
             .ToListAsync();
@@ -244,6 +216,7 @@ public sealed class FacebookFeedModule(
         var query = _db.TrackedFeeds.Where(x =>
             x.GuildId == guildId &&
             x.Platform == FeedPlatform.Facebook &&
+            x.Provider == FeedProvider.Apify &&
             x.SourceKey == sourceKey);
 
         if (channel is not null)
@@ -270,138 +243,35 @@ public sealed class FacebookFeedModule(
         await ReplyAsync($"Removed {feeds.Count} mapping(s) for Facebook source {sourceKey}.");
     }
 
-    private static FeedProvider? ParseProvider(string? value)
+    private ApifyConfigValidation ValidateApifyConfiguration(FacebookSourceType sourceType)
     {
-        if (string.IsNullOrWhiteSpace(value))
+        var options = _apifyOptions.CurrentValue;
+        if (!options.Enabled)
         {
-            return null;
+            return ApifyConfigValidation.Invalid("Apify is disabled. Set APIFY__ENABLED=true before using /add-fb. Use /add-link for direct RSS URLs.");
         }
 
-        return value.Trim().ToLowerInvariant() switch
+        if (string.IsNullOrWhiteSpace(options.ApiToken))
         {
-            "rssbridge" => FeedProvider.RssBridge,
-            "direct" => FeedProvider.DirectRss,
-            "directrss" => FeedProvider.DirectRss,
-            "fetchrss" => FeedProvider.DirectRss,
-            _ => null
-        };
-    }
-
-    private async Task<FeedValidationResult> ValidateRssAsync(string rssUrl, FeedProvider provider, FacebookSourceType sourceType)
-    {
-        var maxRetries = Math.Max(0, _retryOptions.Value.MaxRetries);
-        var initialDelaySeconds = Math.Max(1, _retryOptions.Value.InitialDelaySeconds);
-
-        for (var attempt = 0; attempt <= maxRetries; attempt++)
-        {
-            try
-            {
-                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(8));
-                var client = _httpClientFactory.CreateClient();
-                using var response = await client.GetAsync(rssUrl, HttpCompletionOption.ResponseContentRead, cts.Token);
-
-                if (response.IsSuccessStatusCode)
-                {
-                    var body = await response.Content.ReadAsStringAsync(cts.Token);
-                    if (string.IsNullOrWhiteSpace(body))
-                    {
-                        return FeedValidationResult.Invalid("Feed response is empty.", preferAddLink: false);
-                    }
-
-                    if (LooksLikeErrorPayload(body))
-                    {
-                        if (provider == FeedProvider.RssBridge && sourceType == FacebookSourceType.Profile)
-                        {
-                            _logger.LogWarning(
-                                "RSS validation received bridge error payload for Facebook profile URL {RssUrl}. Allowing registration so runtime fallback can recover.",
-                                rssUrl);
-                            return FeedValidationResult.Valid();
-                        }
-
-                        return FeedValidationResult.Invalid(
-                            "Feed response contains parser error markers.",
-                            preferAddLink: true);
-                    }
-
-                    if (provider == FeedProvider.RssBridge && !HasUsableFeedItems(body))
-                    {
-                        if (sourceType == FacebookSourceType.Profile)
-                        {
-                            _logger.LogWarning(
-                                "RSS-Bridge profile validation returned no usable items for {RssUrl}. Allowing registration due to profile variability.",
-                                rssUrl);
-                            return FeedValidationResult.Valid();
-                        }
-
-                        return FeedValidationResult.Invalid(
-                            "RSS-Bridge response has no usable items for this source.",
-                            preferAddLink: true);
-                    }
-
-                    return FeedValidationResult.Valid();
-                }
-
-                if ((int)response.StatusCode >= 500 && attempt < maxRetries)
-                {
-                    var delay = TimeSpan.FromSeconds(initialDelaySeconds * Math.Pow(2, attempt));
-                    await Task.Delay(delay);
-                    continue;
-                }
-
-                if ((int)response.StatusCode >= 500)
-                {
-                    var warning =
-                        $"Feed provider returned HTTP {(int)response.StatusCode} during validation. " +
-                        "Feed registration is allowed and runtime fallback/retry will handle temporary upstream issues.";
-
-                    _logger.LogWarning(
-                        "Allowing Facebook feed registration despite HTTP {StatusCode} validation result for {RssUrl}",
-                        (int)response.StatusCode,
-                        rssUrl);
-
-                    return FeedValidationResult.Valid(warning);
-                }
-
-                return FeedValidationResult.Invalid(
-                    $"Received HTTP {(int)response.StatusCode} from feed provider.",
-                    preferAddLink: false);
-            }
-            catch (OperationCanceledException) when (attempt < maxRetries)
-            {
-                var delay = TimeSpan.FromSeconds(initialDelaySeconds * Math.Pow(2, attempt));
-                await Task.Delay(delay);
-            }
-            catch (OperationCanceledException)
-            {
-                _logger.LogWarning(
-                    "Allowing Facebook feed registration after validation timeout for {RssUrl}",
-                    rssUrl);
-                return FeedValidationResult.Valid(
-                    "Feed validation timed out. Feed registration is allowed and runtime fallback/retry will continue in background.");
-            }
-            catch (HttpRequestException) when (attempt < maxRetries)
-            {
-                var delay = TimeSpan.FromSeconds(initialDelaySeconds * Math.Pow(2, attempt));
-                await Task.Delay(delay);
-            }
-            catch (HttpRequestException ex)
-            {
-                _logger.LogWarning(
-                    ex,
-                    "Allowing Facebook feed registration after validation network error for {RssUrl}",
-                    rssUrl);
-                return FeedValidationResult.Valid(
-                    "Feed validation hit a temporary network issue. Feed registration is allowed and runtime fallback/retry will continue in background.");
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "RSS validation failed for URL {RssUrl}", rssUrl);
-                return FeedValidationResult.Invalid("Feed validation failed due to an unexpected error.", preferAddLink: false);
-            }
+            return ApifyConfigValidation.Invalid("Apify API token is missing. Set APIFY__APITOKEN before using /add-fb.");
         }
 
-        return FeedValidationResult.Valid(
-            "Feed validation retries were exhausted. Feed registration is allowed and runtime fallback/retry will continue in background.");
+        if (string.IsNullOrWhiteSpace(options.ActorId))
+        {
+            return ApifyConfigValidation.Invalid("Apify actor id is missing. Set APIFY__ACTORID before using /add-fb.");
+        }
+
+        if (sourceType == FacebookSourceType.Fanpage && !options.EnableForFanpage)
+        {
+            return ApifyConfigValidation.Invalid("Apify fanpage ingestion is disabled. Set APIFY__ENABLEFORFANPAGE=true or use /add-link.");
+        }
+
+        if (sourceType == FacebookSourceType.Profile && !options.EnableForProfile)
+        {
+            return ApifyConfigValidation.Invalid("Apify profile ingestion is disabled. Set APIFY__ENABLEFORPROFILE=true or use /add-link.");
+        }
+
+        return ApifyConfigValidation.Valid();
     }
 
     private async Task ReplyAsync(string message, Embed? embed = null, bool ephemeral = true)
@@ -503,77 +373,6 @@ public sealed class FacebookFeedModule(
         return sourceType == FacebookSourceType.Profile ? "profile" : "fanpage";
     }
 
-    private sealed record FeedValidationResult(bool IsValid, string Reason, bool PreferAddLink, string? Warning = null)
-    {
-        public static FeedValidationResult Valid(string? warning = null)
-        {
-            return new FeedValidationResult(true, string.Empty, false, warning);
-        }
-
-        public static FeedValidationResult Invalid(string reason, bool preferAddLink)
-        {
-            return new FeedValidationResult(false, reason, preferAddLink);
-        }
-    }
-
-    private static bool LooksLikeErrorPayload(string payload)
-    {
-        if (string.IsNullOrWhiteSpace(payload))
-        {
-            return false;
-        }
-
-        var hasKnownErrorMarker = payload.Contains("Bridge returned error", StringComparison.OrdinalIgnoreCase) ||
-                                  payload.Contains("404 Page Not Found", StringComparison.OrdinalIgnoreCase) ||
-                                  payload.Contains("HttpException", StringComparison.OrdinalIgnoreCase) ||
-                                  payload.Contains("Not Found", StringComparison.OrdinalIgnoreCase);
-
-        if (!hasKnownErrorMarker)
-        {
-            return false;
-        }
-
-        return !HasUsableFeedItems(payload);
-    }
-
-    private static bool HasUsableFeedItems(string payload)
-    {
-        try
-        {
-            using var textReader = new StringReader(payload);
-            using var xmlReader = XmlReader.Create(textReader, new XmlReaderSettings { DtdProcessing = DtdProcessing.Ignore });
-            var feed = SyndicationFeed.Load(xmlReader);
-            if (feed?.Items is null)
-            {
-                return false;
-            }
-
-            foreach (var item in feed.Items)
-            {
-                var title = item.Title?.Text ?? string.Empty;
-                var summary = item.Summary?.Text
-                    ?? (item.Content as TextSyndicationContent)?.Text
-                    ?? string.Empty;
-
-                var isBridgeError = title.Contains("Bridge returned error", StringComparison.OrdinalIgnoreCase) ||
-                                    summary.Contains("Bridge returned error", StringComparison.OrdinalIgnoreCase) ||
-                                    summary.Contains("404 Page Not Found", StringComparison.OrdinalIgnoreCase) ||
-                                    summary.Contains("HttpException", StringComparison.OrdinalIgnoreCase);
-
-                if (!isBridgeError)
-                {
-                    return true;
-                }
-            }
-
-            return false;
-        }
-        catch
-        {
-            return false;
-        }
-    }
-
     private static string NormalizeFanpageSource(string input)
     {
         if (string.IsNullOrWhiteSpace(input))
@@ -645,5 +444,18 @@ public sealed class FacebookFeedModule(
         }
 
         return $"{prefix}_{normalized}";
+    }
+
+    private sealed record ApifyConfigValidation(bool IsValid, string Message)
+    {
+        public static ApifyConfigValidation Valid()
+        {
+            return new ApifyConfigValidation(true, string.Empty);
+        }
+
+        public static ApifyConfigValidation Invalid(string message)
+        {
+            return new ApifyConfigValidation(false, message);
+        }
     }
 }
