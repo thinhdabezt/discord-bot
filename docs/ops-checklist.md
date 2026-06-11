@@ -1,8 +1,9 @@
-# Ops Checklist
+﻿# Ops Checklist
 
 ## Security
 - Rotate Discord token on leak suspicion
 - Rotate database credentials and update env vars
+- Rotate Apify token on leak suspicion
 - Confirm no secrets are hardcoded in source files
 - Keep runtime secrets only in environment or secret manager, not in appsettings tracked by git
 
@@ -10,6 +11,7 @@
 - Verify latest EF migration has been applied
 - Create backup before applying new migration (`scripts/apply-migrations.ps1` does this by default)
 - Verify `tracked_feeds` schema contains `Platform`, `SourceType`, `Provider`, and `SourceKey`
+- Confirm Facebook rows created by `/add-fb` use `Provider=Apify`; direct RSS Facebook rows use `Provider=DirectRss`
 - Confirm dedupe table growth is monitored
 - Set retention strategy for old `processed_tweets` rows
 
@@ -20,27 +22,28 @@
 - Run preflight script before each release
 - Run smoke test script after each release
 - Confirm smoke test output contains slash command registration summary for `add-x`, `add-fb`, and `add-link` command families
-- Run `scripts/precheck-fanpages.ps1` for batch Facebook onboarding, and only use `/add-fb` for sources marked `use-add-fb`
-- Treat `check-rss-bridge-dns` from `scripts/precheck-fanpages.ps1` as a container DNS/network issue; verify the RSS-Bridge `/config/config.ini.php` mount and service DNS before onboarding Facebook sources
+- Run `scripts/precheck-fanpages.ps1` for batch Facebook onboarding
+- Treat `use-add-fb` as the Apify-primary path
+- Treat `use-add-link` as the direct RSS path and run the concrete `/add-link` command printed by the script
+- Treat `configure-apify` as missing or disabled `APIFY__*` config
+- Treat `fix-direct-rss` as a broken operator-provided direct RSS URL
 - Run `scripts/integration-evidence.ps1` after real `/add-fb` and `/add-link` setup to verify DB + publish evidence
 - For profile sources, verify `/add-fb` uses numeric ID with `sourceType=profile` and evidence script uses `-FacebookSourceType profile`
-- If profile alerts are enabled, verify `FEEDPROVIDERS__FACEBOOKPROFILEALERTCHANNELID` points to an admin-only channel
-- If RSS-Bridge priority fallback is enabled for profiles, monitor profile error-only rate during canary and tune thresholds before broad rollout
-- If Apify fallback is enabled, verify `APIFYFALLBACK__APITOKEN` is set and monitor fallback call frequency against budget
 
 ## Deployment Artifacts
-- Confirm [docs/ENV-MATRIX.md](docs/ENV-MATRIX.md) is up to date with current config shape
-- Confirm [.env.prod.example](.env.prod.example) and [.env.supabase.example](.env.supabase.example) reflect current required variables
-- Confirm [scripts/preflight.ps1](scripts/preflight.ps1) and [scripts/smoke-test.ps1](scripts/smoke-test.ps1) execute successfully
+- Confirm [docs/ENV-MATRIX.md](ENV-MATRIX.md) is up to date with current config shape
+- Confirm [.env.prod.example](../.env.prod.example) and [.env.supabase.example](../.env.supabase.example) reflect current required variables
+- Confirm env examples do not contain Facebook cookie variables for RSS-Bridge
+- Confirm [scripts/preflight.ps1](../scripts/preflight.ps1) and [scripts/smoke-test.ps1](../scripts/smoke-test.ps1) execute successfully
 
 ## Monitoring
 - Track publish success/failure ratio daily
-- Alert on sustained fetch failures per username
-- Alert on repeated Facebook profile fetch issues (403/error-only/empty after prior success) and check RSS-Bridge FacebookBridge access/configuration; resolve DNS/cURL resolution errors before investigating Facebook auth/cookies
-- Alert on unusual spikes of Apify fallback attempts per source (may indicate upstream RSS breakage)
+- Alert on sustained fetch failures per source
+- Alert on unusual spikes of Apify runs per source
 - Alert when bot disconnects from gateway repeatedly
 
 ## Recovery
 - Document how to redeploy from known-good commit
 - Keep a tested backup/restore procedure for Postgres
 - Keep a manual command playbook for emergency disable of noisy feeds
+

@@ -1,4 +1,4 @@
-# Deployment Guide
+﻿# Deployment Guide
 
 ## Scope
 This guide covers two deployment modes:
@@ -129,79 +129,62 @@ For personal profile validation, use:
 ```
 
 ## Facebook Source Pre-check (Batch)
-Before running `/add-fb` on many fanpages, pre-check source health against RSS-Bridge:
+Before running `/add-fb` on many Facebook sources, pre-check onboarding decisions against Apify config and optional direct RSS mapping:
 
 ```powershell
-.\scripts\precheck-fanpages.ps1 -FanpageSources 10150123547145211,100071458686024
+.\scripts\precheck-fanpages.ps1 -FanpageSources nasa,facebook,Meta -EnvFile .env
 ```
 
 You can also read IDs from a file (one source per line, lines starting with `#` are ignored):
 
 ```powershell
-.\scripts\precheck-fanpages.ps1 -FanpageSourcesFile .\fanpages.txt
+.\scripts\precheck-fanpages.ps1 -FanpageSourcesFile .\fanpages.txt -EnvFile .env
 ```
 
 Recommendation meanings:
-- `use-add-fb`: feed has usable entries and is suitable for `/add-fb`
-- `prefer-add-link`: feed is reachable but only contains bridge error entries; prefer direct RSS via `/add-link`
-- `retry-later`: feed has no entries at this moment; retry later before deciding
-- `check-rss-bridge`: request failed; verify `rss-bridge` container and URL
-- `check-rss-bridge-dns`: RSS-Bridge returned an Atom error caused by DNS/cURL hostname resolution. Fix the container DNS/network before using `/add-fb`; this is not a reason to switch the same source to `/add-link`.
+- `use-add-fb`: Apify config is present and the source can be onboarded with `/add-fb`
+- `use-add-link`: a mapped direct RSS URL exists and can be used with `/add-link`
+- `fix-direct-rss`: a mapped direct RSS URL exists but failed HTTP/XML/item validation
+- `configure-apify`: `APIFY__*` config is missing, disabled, or disabled for the requested source type
 - `invalid-source`: source cannot be normalized (bad ID/URL format)
 
-RSS-Bridge Docker runtime is configured by compose with:
-- `.config/rss-bridge/config.ini.php` mounted as `/config/config.ini.php`
-- service DNS resolvers `1.1.1.1` and `8.8.8.8`
-- `[http] timeout = 30` and `retries = 2`
+Facebook onboarding decision tree:
+- If precheck returns `use-add-fb`, register the source with `/add-fb fanpageOrId:<source> channel:<target-channel> sourceType:fanpage`.
+- If precheck returns `use-add-link`, run the concrete `/add-link` command produced from the direct RSS map.
+- If precheck returns `configure-apify`, set `APIFY__ENABLED=true`, `APIFY__APITOKEN`, and `APIFY__ACTORID`, or provide a direct RSS map entry.
+- If precheck returns `fix-direct-rss`, update the mapped URL before using `/add-link`.
 
-Facebook auth/cookie configuration is separate. Only investigate RSS-Bridge service-specific Facebook auth after DNS/network checks are healthy and the bridge can resolve and connect to Facebook.
+Direct RSS validation checklist:
+- Open the direct RSS URL in a browser or run `Invoke-WebRequest <direct-rss-url>`.
+- Confirm HTTP 200.
+- Confirm the XML contains real `<item>` or `<entry>` post entries, not an error page.
+- Register only after validation: `/add-link rssUrl:<direct-rss-url> platform:FB channel:<target-channel>`.
+- Acceptable direct RSS origins include official website RSS, FetchRSS, RSS.app, or another generated RSS provider. Do not commit private generated feed URLs or provider credentials.
+- Store private mappings in ignored file `config/direct-rss-sources.local.csv` with columns `Source,RssUrl,Platform,Notes`.
+- Run precheck with mapping validation:
 
-## Facebook Profile Safety Alerts
-When enabling profile feeds through RSS-Bridge FacebookBridge, configure these env vars in `.env`:
-- `FEEDPROVIDERS__ENABLEFACEBOOKPROFILEALERTS=true`
-- `FEEDPROVIDERS__FACEBOOKPROFILEALERTCHANNELID=<discord_channel_id>`
-- `FEEDPROVIDERS__FACEBOOKPROFILEFAILURETHRESHOLD=3`
-- `FEEDPROVIDERS__FACEBOOKPROFILEALERTCOOLDOWNMINUTES=180`
+```powershell
+.\scripts\precheck-fanpages.ps1 -FanpageSources nasa,facebook,Meta -DirectRssMapFile .\config\direct-rss-sources.local.csv -ValidateDirectRss
+```
 
-Alert behavior:
-- The worker tracks consecutive profile fetch failures (`HTTP 403`, error-only feed, or repeated empty feed after prior success).
-- Once threshold is reached, bot sends a warning to admin alert channel.
-- Cooldown prevents alert spam for the same profile source.
+## Apify Primary For Facebook Sources
+Configure these variables before using `/add-fb`:
+- `APIFY__ENABLED=true`
+- `APIFY__APITOKEN=<apify_api_token>`
+- `APIFY__ACTORID=apify/facebook-posts-scraper`
 
-## Apify Fallback For Facebook Sources
-To recover posts when RSS-Bridge FacebookBridge fails repeatedly for Facebook fanpage/profile sources, configure:
-- `APIFYFALLBACK__ENABLED=true`
-- `APIFYFALLBACK__APITOKEN=<apify_api_token>`
-- `APIFYFALLBACK__ACTORID=apify/facebook-posts-scraper`
-
-Optional cost controls:
-- `APIFYFALLBACK__FAILURETHRESHOLD=3`
-- `APIFYFALLBACK__COOLDOWNMINUTES=180`
-- `APIFYFALLBACK__RESULTSLIMIT=5`
-
-Behavior:
-- Fallback only triggers after consecutive primary provider failures reach threshold.
-- Fallback is rate-limited per source by cooldown.
-- Fallback works for both fanpage and profile when corresponding `APIFYFALLBACK__ENABLEFOR*` flags are true.
-
-## RSS-Bridge Priority Fallback For Facebook
-To insert a lower-cost fallback layer before Apify, configure:
-- `RSSBRIDGEFALLBACK__ENABLED=true`
-- `RSSBRIDGEFALLBACK__FAILURETHRESHOLD=2`
-- `RSSBRIDGEFALLBACK__COOLDOWNMINUTES=60`
-
-Optional scope flags:
-- `RSSBRIDGEFALLBACK__ENABLEFORFANPAGE=true`
-- `RSSBRIDGEFALLBACK__ENABLEFORPROFILE=false`
+Optional controls:
+- `APIFY__RESULTSLIMIT=5`
+- `APIFY__REQUESTTIMEOUTSECONDS=45`
+- `APIFY__POLLINTERVALSECONDS=5`
+- `APIFY__MAXPOLLATTEMPTS=24`
+- `APIFY__ENABLEFORFANPAGE=true`
+- `APIFY__ENABLEFORPROFILE=true`
 
 Runtime order:
-- Primary provider fetch (tracked feed provider)
-- RSS-Bridge fallback (if enabled and policy threshold/cooldown allows)
-- Apify fallback (if RSS-Bridge did not recover usable posts and Apify policy allows)
-
-Notes:
-- RSS-Bridge fallback now supports both fanpage and profile sources.
-- Keep profile flag off by default and enable per canary rollout to monitor source reliability.
+- Facebook `/add-fb` rows fetch through Apify directly.
+- Facebook `/add-link platform:FB` rows fetch through the direct RSS validator/feed client path.
+- RSS-Bridge remains for X/Twitter only.
 
 ## Logs and Diagnostics
 
@@ -224,3 +207,4 @@ docker compose --profile prod up -d --build
 - Never commit real secrets in tracked files.
 - Rotate credentials immediately if leaked.
 - Prefer secret managers for long-term production environments.
+

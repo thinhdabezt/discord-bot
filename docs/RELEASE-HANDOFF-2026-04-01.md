@@ -1,4 +1,4 @@
-# Release Handoff - 2026-04-01
+﻿# Release Handoff - 2026-04-01
 
 ## Scope
 This release finalizes Facebook fanpage rollout, direct RSS integration, runtime migration safety, and command smoke/integration evidence for local docker-prod.
@@ -12,7 +12,7 @@ This release finalizes Facebook fanpage rollout, direct RSS integration, runtime
 | Phase 3 - Integration evidence harness | Done | `8b39ac4` | Added integration evidence script and docs/checklist updates. |
 | Phase 4 - Facebook parser improvements | Done | `3593e18` | Platform-aware parser, caption cleanup, album dedupe tests. |
 | Phase 5 - Fanpage-first refactor | Done | `2c7abd6` | Kept add-fb contract, updated semantics and wording. |
-| Stabilization fixes | Done | `3d2ca35`, `44648a5`, `54448de`, `201d001`, `aa01860` | RSS-Bridge fallback, add-fb validation hardening, clearer UX, non-X media policy for publish. |
+| Stabilization fixes | Done | `3d2ca35`, `44648a5`, `54448de`, `201d001`, `aa01860` | legacy Facebook provider hardening, clearer UX, non-X media policy for publish. |
 
 ## Verification Evidence
 
@@ -36,7 +36,7 @@ This release finalizes Facebook fanpage rollout, direct RSS integration, runtime
    - `./scripts/apply-migrations.ps1 -Mode docker`
 3. Confirm provider toggles:
    - `FEEDPROVIDERS__ENABLEDIRECTRSS=true`
-   - `FEEDPROVIDERS__DEFAULTFACEBOOKPROVIDER` set to your target provider (`RssBridge` recommended fallback, `RssHub` if route is confirmed).
+   - `APIFY__ENABLED=true plus APIFY__APITOKEN and APIFY__ACTORID for Facebook `/add-fb`.
 
 ### 2. Deploy
 1. Deploy containers:
@@ -62,7 +62,7 @@ This release finalizes Facebook fanpage rollout, direct RSS integration, runtime
    - `dotnet ef database update InitialCreate --project src/DiscordXBot/DiscordXBot.csproj --startup-project src/DiscordXBot/DiscordXBot.csproj`
 
 ## Residual Risks
-- RSSHub Facebook route availability may vary by upstream image/version. Keep RSS-Bridge fallback available for add-fb fanpage path.
+- Facebook `/add-fb` now uses Apify primary; use `/add-link platform:FB` for operator-provided direct RSS.
 - Non-X feeds now allow caption/mixed media by policy; monitor noise/format quality for high-volume RSS sources.
 - Existing X path remains strict image-only and unchanged by policy for stability.
 
@@ -70,3 +70,4 @@ This release finalizes Facebook fanpage rollout, direct RSS integration, runtime
 1. Add explicit platform/provider controls in command options to reduce operator ambiguity.
 2. Add source-type column for Facebook (`Fanpage` default, `Profile` reserved) when schema evolution is approved.
 3. Add targeted integration tests for command-to-DB persistence where feasible.
+
