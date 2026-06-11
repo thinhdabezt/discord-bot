@@ -50,6 +50,9 @@ public sealed class InteractionHandlerHostedService(
             var devGuildId = _options.Value.DevGuildId;
             if (devGuildId.HasValue)
             {
+                await _client.Rest.DeleteAllGlobalCommandsAsync();
+                _logger.LogInformation("Deleted global slash commands before registering guild commands.");
+
                 await _interactionService.RegisterCommandsToGuildAsync(devGuildId.Value, true);
                 _logger.LogInformation("Registered slash commands to guild {GuildId}", devGuildId.Value);
             }
