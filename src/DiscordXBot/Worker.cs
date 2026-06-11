@@ -3,7 +3,6 @@ using DiscordXBot.Data;
 using DiscordXBot.Data.Entities;
 using DiscordXBot.Services;
 using DiscordXBot.Services.Models;
-using System.Collections.Concurrent;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Npgsql;
@@ -17,17 +16,11 @@ public class Worker : BackgroundService
     private readonly IOptionsMonitor<PollingOptions> _pollingOptions;
     private readonly IOptionsMonitor<RetryOptions> _retryOptions;
     private readonly IOptionsMonitor<PublishOptions> _publishOptions;
-    private readonly IOptionsMonitor<FeedProviderOptions> _feedProviderOptions;
-    private readonly IOptionsMonitor<RssBridgeFallbackOptions> _rssBridgeFallbackOptions;
-    private readonly IOptionsMonitor<ApifyFallbackOptions> _apifyFallbackOptions;
     private readonly RssBridgeClient _rssBridgeClient;
     private readonly FeedUrlResolver _feedUrlResolver;
     private readonly ApifyFacebookClient _apifyFacebookClient;
     private readonly TweetContentParser _tweetContentParser;
     private readonly DiscordPublisher _discordPublisher;
-    private readonly ConcurrentDictionary<string, ProfileFetchHealthState> _profileFetchHealth = new(StringComparer.OrdinalIgnoreCase);
-    private readonly ConcurrentDictionary<string, FacebookFallbackState> _rssBridgeFallbackState = new(StringComparer.OrdinalIgnoreCase);
-    private readonly ConcurrentDictionary<string, FacebookFallbackState> _apifyFallbackState = new(StringComparer.OrdinalIgnoreCase);
 
     public Worker(
         ILogger<Worker> logger,
@@ -35,11 +28,8 @@ public class Worker : BackgroundService
         IOptionsMonitor<PollingOptions> pollingOptions,
         IOptionsMonitor<RetryOptions> retryOptions,
         IOptionsMonitor<PublishOptions> publishOptions,
-        IOptionsMonitor<FeedProviderOptions> feedProviderOptions,
-        IOptionsMonitor<RssBridgeFallbackOptions> rssBridgeFallbackOptions,
         RssBridgeClient rssBridgeClient,
         FeedUrlResolver feedUrlResolver,
-        IOptionsMonitor<ApifyFallbackOptions> apifyFallbackOptions,
         ApifyFacebookClient apifyFacebookClient,
         TweetContentParser tweetContentParser,
         DiscordPublisher discordPublisher)
@@ -49,9 +39,6 @@ public class Worker : BackgroundService
         _pollingOptions = pollingOptions;
         _retryOptions = retryOptions;
         _publishOptions = publishOptions;
-        _feedProviderOptions = feedProviderOptions;
-        _rssBridgeFallbackOptions = rssBridgeFallbackOptions;
-        _apifyFallbackOptions = apifyFallbackOptions;
         _rssBridgeClient = rssBridgeClient;
         _feedUrlResolver = feedUrlResolver;
         _apifyFacebookClient = apifyFacebookClient;
@@ -115,37 +102,18 @@ public class Worker : BackgroundService
         {
             var sampleFeed = group.First();
             var feedLabel = GetFeedLabel(sampleFeed);
-            FeedFetchResult fetchResult;
             FeedFetchResult effectiveFetchResult;
 
             try
             {
-                fetchResult = await FetchPostsWithRetryAsync(
+                effectiveFetchResult = await FetchPostsAsync(
                     sampleFeed,
                     _pollingOptions.CurrentValue.MaxItemsPerFeed,
-                    cancellationToken);
-
-                var rssBridgeFallbackResult = await TryApplyFacebookRssBridgeFallbackAsync(
-                    sampleFeed,
-                    fetchResult,
-                    _pollingOptions.CurrentValue.MaxItemsPerFeed,
-                    cancellationToken);
-
-                effectiveFetchResult = await TryApplyFacebookApifyFallbackAsync(
-                    sampleFeed,
-                    rssBridgeFallbackResult,
-                    _pollingOptions.CurrentValue.MaxItemsPerFeed,
-                    cancellationToken);
-
-                await EvaluateProfileHealthAsync(
-                    db,
-                    sampleFeed,
-                    effectiveFetchResult,
                     cancellationToken);
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Failed to fetch RSS for {FeedLabel}", feedLabel);
+                _logger.LogWarning(ex, "Failed to fetch posts for {FeedLabel}", feedLabel);
                 continue;
             }
 
@@ -261,7 +229,23 @@ public class Worker : BackgroundService
             totalRetries);
     }
 
-    private async Task<FeedFetchResult> FetchPostsWithRetryAsync(
+    private async Task<FeedFetchResult> FetchPostsAsync(
+        TrackedFeed trackedFeed,
+        int maxItems,
+        CancellationToken cancellationToken)
+    {
+        if (trackedFeed.Platform == FeedPlatform.Facebook && trackedFeed.Provider == FeedProvider.Apify)
+        {
+            var posts = await _apifyFacebookClient.FetchPostsAsync(trackedFeed, maxItems, cancellationToken);
+            return posts.Count > 0
+                ? FeedFetchResult.Success(posts)
+                : FeedFetchResult.Empty("Apify returned no usable posts.");
+        }
+
+        return await FetchRssPostsWithRetryAsync(trackedFeed, maxItems, cancellationToken);
+    }
+
+    private async Task<FeedFetchResult> FetchRssPostsWithRetryAsync(
         TrackedFeed trackedFeed,
         int maxItems,
         CancellationToken cancellationToken)
@@ -285,335 +269,6 @@ public class Worker : BackgroundService
         return FeedFetchResult.NetworkError("Fetch retry budget exhausted.");
     }
 
-    private async Task<FeedFetchResult> TryApplyFacebookRssBridgeFallbackAsync(
-        TrackedFeed sampleFeed,
-        FeedFetchResult primaryResult,
-        int maxItems,
-        CancellationToken cancellationToken)
-    {
-        if (sampleFeed.Platform != FeedPlatform.Facebook)
-        {
-            return primaryResult;
-        }
-
-        var stateKey = GetRssBridgeFallbackStateKey(sampleFeed);
-        var state = _rssBridgeFallbackState.GetOrAdd(stateKey, _ => new FacebookFallbackState());
-
-        if (primaryResult.Outcome == FeedFetchOutcome.Success && primaryResult.Posts.Count > 0)
-        {
-            state.ConsecutivePrimaryFailures = 0;
-            return primaryResult;
-        }
-
-        if (!ShouldConsiderFallbackOutcome(primaryResult.Outcome))
-        {
-            return primaryResult;
-        }
-
-        var options = _rssBridgeFallbackOptions.CurrentValue;
-        if (!options.Enabled)
-        {
-            return primaryResult;
-        }
-
-        if ((sampleFeed.SourceType == FacebookSourceType.Fanpage && !options.EnableForFanpage) ||
-            (sampleFeed.SourceType == FacebookSourceType.Profile && !options.EnableForProfile))
-        {
-            return primaryResult;
-        }
-
-        if (sampleFeed.Provider == FeedProvider.RssBridge)
-        {
-            return primaryResult;
-        }
-
-        state.ConsecutivePrimaryFailures++;
-
-        var threshold = Math.Max(1, options.FailureThreshold);
-        if (sampleFeed.SourceType == FacebookSourceType.Profile && primaryResult.Outcome == FeedFetchOutcome.ErrorOnly)
-        {
-            threshold = 1;
-        }
-        if (state.ConsecutivePrimaryFailures < threshold)
-        {
-            return primaryResult;
-        }
-
-        var cooldownMinutes = Math.Max(5, options.CooldownMinutes);
-        var utcNow = DateTime.UtcNow;
-        if (state.LastFallbackAttemptUtc != default &&
-            utcNow - state.LastFallbackAttemptUtc < TimeSpan.FromMinutes(cooldownMinutes))
-        {
-            return primaryResult;
-        }
-
-        string fallbackUrl;
-        try
-        {
-            var source = string.IsNullOrWhiteSpace(sampleFeed.SourceKey)
-                ? sampleFeed.XUsername
-                : sampleFeed.SourceKey;
-
-            fallbackUrl = _feedUrlResolver.Resolve(
-                FeedPlatform.Facebook,
-                FeedProvider.RssBridge,
-                source,
-                sampleFeed.SourceType);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(
-                ex,
-                "RSS-Bridge fallback cannot resolve source {FeedLabel}.",
-                GetFeedLabel(sampleFeed));
-            return primaryResult;
-        }
-
-        var fallbackFeed = new TrackedFeed
-        {
-            Platform = FeedPlatform.Facebook,
-            SourceType = sampleFeed.SourceType,
-            SourceKey = sampleFeed.SourceKey,
-            XUsername = sampleFeed.XUsername,
-            Provider = FeedProvider.RssBridge,
-            RssUrl = fallbackUrl,
-            IsActive = sampleFeed.IsActive,
-            GuildId = sampleFeed.GuildId,
-            ChannelId = sampleFeed.ChannelId
-        };
-
-        state.LastFallbackAttemptUtc = utcNow;
-
-        var fallbackResult = await _rssBridgeClient.GetPostsDetailedAsync(fallbackFeed, maxItems, cancellationToken);
-        if (fallbackResult.Outcome == FeedFetchOutcome.Success && fallbackResult.Posts.Count > 0)
-        {
-            state.ConsecutivePrimaryFailures = 0;
-
-            _logger.LogInformation(
-                "Using RSS-Bridge fallback for source {FeedLabel}. PrimaryOutcome={PrimaryOutcome}, FallbackPosts={Count}",
-                GetFeedLabel(sampleFeed),
-                GetFetchOutcomeLabel(primaryResult.Outcome),
-                fallbackResult.Posts.Count);
-
-            return fallbackResult;
-        }
-
-        _logger.LogWarning(
-            "RSS-Bridge fallback returned no usable posts for source {FeedLabel}. PrimaryOutcome={PrimaryOutcome}, FallbackOutcome={FallbackOutcome}",
-            GetFeedLabel(sampleFeed),
-            GetFetchOutcomeLabel(primaryResult.Outcome),
-            GetFetchOutcomeLabel(fallbackResult.Outcome));
-
-        return primaryResult;
-    }
-
-    private async Task<FeedFetchResult> TryApplyFacebookApifyFallbackAsync(
-        TrackedFeed sampleFeed,
-        FeedFetchResult primaryResult,
-        int maxItems,
-        CancellationToken cancellationToken)
-    {
-        if (sampleFeed.Platform != FeedPlatform.Facebook)
-        {
-            return primaryResult;
-        }
-
-        var stateKey = GetApifyFallbackStateKey(sampleFeed);
-        var state = _apifyFallbackState.GetOrAdd(stateKey, _ => new FacebookFallbackState());
-
-        if (primaryResult.Outcome == FeedFetchOutcome.Success && primaryResult.Posts.Count > 0)
-        {
-            state.ConsecutivePrimaryFailures = 0;
-            return primaryResult;
-        }
-
-        if (!ShouldConsiderFallbackOutcome(primaryResult.Outcome))
-        {
-            return primaryResult;
-        }
-
-        var options = _apifyFallbackOptions.CurrentValue;
-        if (!options.Enabled || string.IsNullOrWhiteSpace(options.ApiToken))
-        {
-            return primaryResult;
-        }
-
-        if ((sampleFeed.SourceType == FacebookSourceType.Fanpage && !options.EnableForFanpage) ||
-            (sampleFeed.SourceType == FacebookSourceType.Profile && !options.EnableForProfile))
-        {
-            return primaryResult;
-        }
-
-        state.ConsecutivePrimaryFailures++;
-
-        var threshold = Math.Max(1, options.FailureThreshold);
-        if (state.ConsecutivePrimaryFailures < threshold)
-        {
-            return primaryResult;
-        }
-
-        var cooldownMinutes = Math.Max(5, options.CooldownMinutes);
-        var utcNow = DateTime.UtcNow;
-        if (state.LastFallbackAttemptUtc != default &&
-            utcNow - state.LastFallbackAttemptUtc < TimeSpan.FromMinutes(cooldownMinutes))
-        {
-            return primaryResult;
-        }
-
-        state.LastFallbackAttemptUtc = utcNow;
-        var fallbackPosts = await _apifyFacebookClient.FetchPostsAsync(sampleFeed, maxItems, cancellationToken);
-        if (fallbackPosts.Count == 0)
-        {
-            _logger.LogWarning(
-                "Apify fallback returned no posts for source {FeedLabel}. PrimaryOutcome={PrimaryOutcome}",
-                GetFeedLabel(sampleFeed),
-                GetFetchOutcomeLabel(primaryResult.Outcome));
-            return primaryResult;
-        }
-
-        state.ConsecutivePrimaryFailures = 0;
-
-        _logger.LogInformation(
-            "Using Apify fallback for source {FeedLabel}. PrimaryOutcome={PrimaryOutcome}, FallbackPosts={Count}",
-            GetFeedLabel(sampleFeed),
-            GetFetchOutcomeLabel(primaryResult.Outcome),
-            fallbackPosts.Count);
-
-        return FeedFetchResult.Success(fallbackPosts);
-    }
-
-    private static bool ShouldConsiderFallbackOutcome(FeedFetchOutcome outcome)
-    {
-        return outcome is FeedFetchOutcome.HttpForbidden
-            or FeedFetchOutcome.HttpError
-            or FeedFetchOutcome.NetworkError
-            or FeedFetchOutcome.ParseError
-            or FeedFetchOutcome.ErrorOnly;
-    }
-
-    private async Task EvaluateProfileHealthAsync(
-        BotDbContext db,
-        TrackedFeed sampleFeed,
-        FeedFetchResult fetchResult,
-        CancellationToken cancellationToken)
-    {
-        if (sampleFeed.Platform != FeedPlatform.Facebook || sampleFeed.SourceType != FacebookSourceType.Profile)
-        {
-            return;
-        }
-
-        var stateKey = GetProfileStateKey(sampleFeed);
-        var state = _profileFetchHealth.GetOrAdd(stateKey, _ => new ProfileFetchHealthState());
-
-        if (fetchResult.Outcome == FeedFetchOutcome.Success && fetchResult.Posts.Count > 0)
-        {
-            state.ConsecutiveFailures = 0;
-            state.HasHistoricalSuccess = true;
-            return;
-        }
-
-        var shouldCountFailure = await ShouldCountProfileFailureAsync(
-            db,
-            sampleFeed,
-            fetchResult,
-            state,
-            cancellationToken);
-
-        if (!shouldCountFailure)
-        {
-            state.ConsecutiveFailures = 0;
-            return;
-        }
-
-        state.ConsecutiveFailures++;
-        var outcomeLabel = GetFetchOutcomeLabel(fetchResult.Outcome);
-
-        _logger.LogWarning(
-            "Profile feed issue detected for {FeedLabel}. ConsecutiveIssues={ConsecutiveIssues}, Outcome={Outcome}, StatusCode={StatusCode}",
-            GetFeedLabel(sampleFeed),
-            state.ConsecutiveFailures,
-            outcomeLabel,
-            fetchResult.StatusCode);
-
-        var options = _feedProviderOptions.CurrentValue;
-        if (!options.EnableFacebookProfileAlerts || options.FacebookProfileAlertChannelId == 0)
-        {
-            return;
-        }
-
-        var failureThreshold = Math.Max(1, options.FacebookProfileFailureThreshold);
-        if (state.ConsecutiveFailures < failureThreshold)
-        {
-            return;
-        }
-
-        var cooldownMinutes = Math.Max(5, options.FacebookProfileAlertCooldownMinutes);
-        var utcNow = DateTime.UtcNow;
-        if (state.LastAlertAtUtc != default &&
-            utcNow - state.LastAlertAtUtc < TimeSpan.FromMinutes(cooldownMinutes))
-        {
-            return;
-        }
-
-        var alertMessage =
-            $"[FB Profile Alert] Source={sampleFeed.SourceKey} has {state.ConsecutiveFailures} consecutive fetch issues ({outcomeLabel}). " +
-            "Profile visibility may have changed. Check RSS-Bridge FacebookBridge configuration and source accessibility.";
-
-        var alertResult = await _discordPublisher.PublishSystemAlertAsync(
-            options.FacebookProfileAlertChannelId,
-            alertMessage,
-            cancellationToken);
-
-        if (alertResult.Success)
-        {
-            state.LastAlertAtUtc = utcNow;
-            _logger.LogInformation(
-                "Sent FB profile health alert for source {SourceKey} to channel {ChannelId}",
-                sampleFeed.SourceKey,
-                options.FacebookProfileAlertChannelId);
-            return;
-        }
-
-        _logger.LogWarning(
-            "Failed to send FB profile health alert for source {SourceKey}: {Failure}",
-            sampleFeed.SourceKey,
-            alertResult.ErrorMessage);
-    }
-
-    private async Task<bool> ShouldCountProfileFailureAsync(
-        BotDbContext db,
-        TrackedFeed sampleFeed,
-        FeedFetchResult fetchResult,
-        ProfileFetchHealthState state,
-        CancellationToken cancellationToken)
-    {
-        if (fetchResult.Outcome is FeedFetchOutcome.HttpForbidden or FeedFetchOutcome.ErrorOnly)
-        {
-            return true;
-        }
-
-        if (fetchResult.Outcome != FeedFetchOutcome.Empty)
-        {
-            return false;
-        }
-
-        if (state.HasHistoricalSuccess)
-        {
-            return true;
-        }
-
-        var hasHistoricalPublish = await db.ProcessedTweets
-            .AsNoTracking()
-            .AnyAsync(x => x.TrackedFeedId == sampleFeed.Id, cancellationToken);
-
-        if (hasHistoricalPublish)
-        {
-            state.HasHistoricalSuccess = true;
-        }
-
-        return hasHistoricalPublish;
-    }
-
     private static bool IsRetriableFetchOutcome(FeedFetchResult result)
     {
         if (result.Outcome == FeedFetchOutcome.NetworkError)
@@ -622,38 +277,6 @@ public class Worker : BackgroundService
         }
 
         return result.Outcome == FeedFetchOutcome.HttpError && result.StatusCode is >= 500;
-    }
-
-    private static string GetFetchOutcomeLabel(FeedFetchOutcome outcome)
-    {
-        return outcome switch
-        {
-            FeedFetchOutcome.HttpForbidden => "HTTP 403",
-            FeedFetchOutcome.ErrorOnly => "error-only-feed",
-            FeedFetchOutcome.Empty => "empty-feed",
-            FeedFetchOutcome.HttpError => "http-error",
-            FeedFetchOutcome.NetworkError => "network-error",
-            FeedFetchOutcome.ParseError => "parse-error",
-            _ => "success"
-        };
-    }
-
-    private static string GetProfileStateKey(TrackedFeed feed)
-    {
-        var source = GetSourceKey(feed);
-        return $"{feed.Platform}:{feed.SourceType}:{source}";
-    }
-
-    private static string GetRssBridgeFallbackStateKey(TrackedFeed feed)
-    {
-        var source = GetSourceKey(feed);
-        return $"fb-rssbridge-fallback:{feed.SourceType}:{source}";
-    }
-
-    private static string GetApifyFallbackStateKey(TrackedFeed feed)
-    {
-        var source = GetSourceKey(feed);
-        return $"fb-apify-fallback:{feed.SourceType}:{source}";
     }
 
     private async Task<(PublishResult Result, int RetryCount)> PublishWithRetryAsync(
@@ -734,16 +357,4 @@ public class Worker : BackgroundService
         return $"{feed.Platform}:{sourceKey}";
     }
 
-    private sealed class ProfileFetchHealthState
-    {
-        public int ConsecutiveFailures { get; set; }
-        public bool HasHistoricalSuccess { get; set; }
-        public DateTime LastAlertAtUtc { get; set; }
-    }
-
-    private sealed class FacebookFallbackState
-    {
-        public int ConsecutivePrimaryFailures { get; set; }
-        public DateTime LastFallbackAttemptUtc { get; set; }
-    }
 }

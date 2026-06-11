@@ -18,5 +18,7 @@ public enum FeedProvider
     DirectRss = 1,
 
     [Obsolete("RSSHub has been removed. Legacy value is retained only for config/database migration compatibility.")]
-    RssHub = 2
+    RssHub = 2,
+
+    Apify = 3
 }

@@ -1,8 +1,8 @@
 namespace DiscordXBot.Configuration;
 
-public sealed class ApifyFallbackOptions
+public sealed class ApifyOptions
 {
-    public const string SectionName = "ApifyFallback";
+    public const string SectionName = "Apify";
 
     public bool Enabled { get; set; } = false;
     public string ApiBaseUrl { get; set; } = "https://api.apify.com/v2";
@@ -12,8 +12,6 @@ public sealed class ApifyFallbackOptions
     public int RequestTimeoutSeconds { get; set; } = 45;
     public int PollIntervalSeconds { get; set; } = 5;
     public int MaxPollAttempts { get; set; } = 24;
-    public int FailureThreshold { get; set; } = 3;
-    public int CooldownMinutes { get; set; } = 180;
     public bool EnableForFanpage { get; set; } = true;
     public bool EnableForProfile { get; set; } = true;
 }
