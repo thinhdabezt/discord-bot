@@ -8,6 +8,9 @@ param(
         "add-fb",
         "list-fb",
         "remove-fb",
+        "add-ig",
+        "list-ig",
+        "remove-ig",
         "add-link",
         "list-links",
         "remove-link"

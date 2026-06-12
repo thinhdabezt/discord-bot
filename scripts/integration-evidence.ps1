@@ -3,6 +3,7 @@ param(
     [string]$FanpageSource,
     [ValidateSet("fanpage", "profile")]
     [string]$FacebookSourceType = "fanpage",
+    [string]$InstagramUsername,
     [string]$DirectRssUrl,
     [int]$LookbackMinutes = 120,
     [switch]$SkipLogScan
@@ -91,6 +92,46 @@ function ConvertTo-FanpageSourceKey {
     return $value
 }
 
+function ConvertTo-InstagramUsername {
+    param([string]$InputValue)
+
+    if ([string]::IsNullOrWhiteSpace($InputValue)) {
+        return ""
+    }
+
+    $value = $InputValue.Trim()
+    $uri = $null
+
+    if ([Uri]::TryCreate($value, [UriKind]::Absolute, [ref]$uri)) {
+        if ($uri.Host -ne "instagram.com" -and $uri.Host -ne "www.instagram.com") {
+            return ""
+        }
+
+        $segments = $uri.AbsolutePath.Split('/', [System.StringSplitOptions]::RemoveEmptyEntries)
+        if ($segments.Count -le 0) {
+            return ""
+        }
+
+        if ($segments[0] -in @("p", "reel", "reels", "stories", "explore")) {
+            return ""
+        }
+
+        $value = $segments[0]
+    }
+
+    if ($value.StartsWith('@')) {
+        $value = $value.Substring(1)
+    }
+
+    $value = $value.ToLowerInvariant()
+    $value = [System.Text.RegularExpressions.Regex]::Replace($value, '[^a-z0-9._]', '')
+    if ($value.Length -lt 1 -or $value.Length -gt 30) {
+        return ""
+    }
+
+    return $value
+}
+
 function Invoke-DbSql {
     param(
         [string]$User,
@@ -126,7 +167,10 @@ $envMap = Read-EnvMap -Path ".env"
 $postgresUser = if ($envMap.ContainsKey("POSTGRES_USER") -and -not [string]::IsNullOrWhiteSpace($envMap["POSTGRES_USER"])) { $envMap["POSTGRES_USER"] } else { "postgres" }
 $postgresDb = if ($envMap.ContainsKey("POSTGRES_DB") -and -not [string]::IsNullOrWhiteSpace($envMap["POSTGRES_DB"])) { $envMap["POSTGRES_DB"] } else { "discordbot" }
 
-if ($failed -eq 0 -and [string]::IsNullOrWhiteSpace($FanpageSource) -and [string]::IsNullOrWhiteSpace($DirectRssUrl)) {
+if ($failed -eq 0 -and
+    [string]::IsNullOrWhiteSpace($FanpageSource) -and
+    [string]::IsNullOrWhiteSpace($InstagramUsername) -and
+    [string]::IsNullOrWhiteSpace($DirectRssUrl)) {
     Info "No target feed provided. Pass -FanpageSource and/or -DirectRssUrl to run command-path evidence checks."
 }
 
@@ -160,6 +204,34 @@ if ($failed -eq 0 -and -not [string]::IsNullOrWhiteSpace($FanpageSource)) {
     }
 }
 
+if ($failed -eq 0 -and -not [string]::IsNullOrWhiteSpace($InstagramUsername)) {
+    $normalizedInstagram = ConvertTo-InstagramUsername -InputValue $InstagramUsername
+
+    if ([string]::IsNullOrWhiteSpace($normalizedInstagram)) {
+        Fail "Instagram username normalization failed. Check -InstagramUsername input."
+    }
+    else {
+        $instagramSqlValue = ConvertTo-SqlLiteral $normalizedInstagram
+        $instagramSql = "SELECT COUNT(*) FROM tracked_feeds t WHERE (to_jsonb(t)->>'Platform')::int = 2 AND (to_jsonb(t)->>'Provider')::int = 0 AND lower(to_jsonb(t)->>'SourceKey') = lower('$instagramSqlValue');"
+        $instagramCountText = Invoke-DbSql -User $postgresUser -Database $postgresDb -Sql $instagramSql
+        $instagramText = ($instagramCountText | Out-String)
+
+        if ($LASTEXITCODE -ne 0 -or $instagramText -match 'ERROR:') {
+            Fail "Failed querying tracked Instagram source mapping."
+        }
+        else {
+            $instagramCount = 0
+            [void][int]::TryParse($instagramText.Trim(), [ref]$instagramCount)
+            if ($instagramCount -gt 0) {
+                Pass "Instagram mapping exists for '$normalizedInstagram' (count=$instagramCount)."
+            }
+            else {
+                Fail "No tracked Instagram mapping found for '$normalizedInstagram'. Run /add-ig first."
+            }
+        }
+    }
+}
+
 if ($failed -eq 0 -and -not [string]::IsNullOrWhiteSpace($DirectRssUrl)) {
     $rssUrlValue = ConvertTo-SqlLiteral $DirectRssUrl.Trim()
     $directSql = "SELECT COUNT(*) FROM tracked_feeds t WHERE (to_jsonb(t)->>'Provider')::int = 1 AND to_jsonb(t)->>'RssUrl' = '$rssUrlValue';"
@@ -183,7 +255,7 @@ if ($failed -eq 0 -and -not [string]::IsNullOrWhiteSpace($DirectRssUrl)) {
 
 if ($failed -eq 0) {
     $lookback = [Math]::Max(1, $LookbackMinutes)
-    $publishSql = "SELECT COUNT(*) FROM processed_tweets p JOIN tracked_feeds t ON (to_jsonb(p)->>'TrackedFeedId')::bigint = (to_jsonb(t)->>'Id')::bigint WHERE (to_jsonb(p)->>'ProcessedAtUtc')::timestamptz >= NOW() - INTERVAL '$lookback minutes' AND ((to_jsonb(t)->>'Platform')::int = 1 OR (to_jsonb(t)->>'Provider')::int = 1);"
+    $publishSql = "SELECT COUNT(*) FROM processed_tweets p JOIN tracked_feeds t ON (to_jsonb(p)->>'TrackedFeedId')::bigint = (to_jsonb(t)->>'Id')::bigint WHERE (to_jsonb(p)->>'ProcessedAtUtc')::timestamptz >= NOW() - INTERVAL '$lookback minutes' AND ((to_jsonb(t)->>'Platform')::int IN (1, 2) OR (to_jsonb(t)->>'Provider')::int = 1);"
     $publishCountText = Invoke-DbSql -User $postgresUser -Database $postgresDb -Sql $publishSql
     $publishText = ($publishCountText | Out-String)
 
@@ -194,7 +266,7 @@ if ($failed -eq 0) {
         $publishCount = 0
         [void][int]::TryParse($publishText.Trim(), [ref]$publishCount)
         if ($publishCount -gt 0) {
-            Pass "Found publish evidence in processed_tweets for fanpage/direct paths within lookback window (count=$publishCount)."
+            Pass "Found publish evidence in processed_tweets for Facebook/Instagram/direct paths within lookback window (count=$publishCount)."
         }
         else {
             Fail "No publish evidence found in processed_tweets within the lookback window."
