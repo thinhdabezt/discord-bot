@@ -102,22 +102,24 @@ Manual checks:
 - Slash commands are visible in target guild
 - /add-x persists feed mapping
 - /add-fb (fanpage) and /add-link persist feed mapping
+- /add-ig persists Instagram username mapping
 - New tweet is published once only
 
 The smoke script now verifies:
 - `tracked_feeds` includes `Platform`, `SourceType`, `Provider`, `SourceKey`
 - Active feed summary grouped by `Platform`, `SourceType`, and `Provider`
-- Slash command registration summary contains: `add-x/list-x/remove-x`, `add-fb/list-fb/remove-fb`, `add-link/list-links/remove-link`
+- Slash command registration summary contains: `add-x/list-x/remove-x`, `add-fb/list-fb/remove-fb`, `add-ig/list-ig/remove-ig`, `add-link/list-links/remove-link`
 
-## Integration Evidence (Fanpage + Direct RSS)
-After you run `/add-fb` and `/add-link` with real test inputs, verify persisted mapping and publish evidence:
+## Integration Evidence (Facebook + Instagram + Direct RSS)
+After you run `/add-fb`, `/add-ig`, and `/add-link` with real test inputs, verify persisted mapping and publish evidence:
 
 ```powershell
-.\scripts\integration-evidence.ps1 -ComposeMode prod -FanpageSource nasa -FacebookSourceType fanpage -DirectRssUrl "https://example.com/feed.xml" -LookbackMinutes 180
+.\scripts\integration-evidence.ps1 -ComposeMode prod -FanpageSource nasa -FacebookSourceType fanpage -InstagramUsername nasa -DirectRssUrl "https://example.com/feed.xml" -LookbackMinutes 180
 ```
 
 This script checks:
-- `tracked_feeds` contains Facebook source mapping with requested source type (`Platform=Facebook`, `SourceType=Fanpage|Profile`, `Provider=RssBridge`)
+- `tracked_feeds` contains Facebook source mapping with requested source type (`Platform=Facebook`, `SourceType=Fanpage|Profile`, `Provider=Apify`)
+- `tracked_feeds` contains Instagram username mapping (`Platform=Instagram`, `Provider=RssBridge`)
 - `tracked_feeds` contains direct RSS mapping (`Provider=DirectRss`)
 - `processed_tweets` contains publish evidence for the configured lookback window
 - bot logs include publish activity pattern
@@ -158,7 +160,7 @@ Direct RSS validation checklist:
 - Open the direct RSS URL in a browser or run `Invoke-WebRequest <direct-rss-url>`.
 - Confirm HTTP 200.
 - Confirm the XML contains real `<item>` or `<entry>` post entries, not an error page.
-- Register only after validation: `/add-link rssUrl:<direct-rss-url> platform:FB channel:<target-channel>`.
+- Register only after validation: `/add-link rssUrl:<direct-rss-url> platform:FB channel:<target-channel>` or `/add-link rssUrl:<direct-rss-url> platform:IG channel:<target-channel>`.
 - Acceptable direct RSS origins include official website RSS, FetchRSS, RSS.app, or another generated RSS provider. Do not commit private generated feed URLs or provider credentials.
 - Store private mappings in ignored file `config/direct-rss-sources.local.csv` with columns `Source,RssUrl,Platform,Notes`.
 - Run precheck with mapping validation:
@@ -184,7 +186,25 @@ Optional controls:
 Runtime order:
 - Facebook `/add-fb` rows fetch through Apify directly.
 - Facebook `/add-link platform:FB` rows fetch through the direct RSS validator/feed client path.
-- RSS-Bridge remains for X/Twitter only.
+- Instagram `/add-ig` rows fetch through RSS-Bridge `InstagramBridge`.
+- Instagram `/add-link platform:IG` rows fetch through the direct RSS validator/feed client path.
+- RSS-Bridge remains for X/Twitter and Instagram.
+
+## Instagram RSS-Bridge Sources
+Instagram v1 supports public username feeds only:
+
+```powershell
+/add-ig username:nasa channel:<target-channel>
+/list-ig
+/remove-ig username:nasa
+```
+
+RSS-Bridge URL shape:
+`?action=display&bridge=InstagramBridge&context=Username&u=<username>&media_type=all&direct_links=on&format=Atom`
+
+Notes:
+- No Instagram auth/session/cookie support is configured in bot env.
+- If InstagramBridge returns an upstream access error or empty feed, use `/add-link rssUrl:<direct-rss-url> platform:IG channel:<target-channel>` with a tested direct RSS URL.
 
 ## Logs and Diagnostics
 

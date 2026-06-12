@@ -1,24 +1,26 @@
 ﻿# ---
 
-**Discord Feed Bot (X \+ Facebook)**
+**Discord Feed Bot (X \+ Facebook \+ Instagram)**
 
-Bot Discord tự động lấy feed từ X/Facebook và đăng vào channel theo lịch polling.
+Bot Discord tự động lấy feed từ X/Facebook/Instagram và đăng vào channel theo lịch polling.
 
 Tài liệu này là hướng dẫn end-to-end từ setup đến deploy và vận hành hằng ngày.
 
 ## **1\. Tổng quan nhanh**
 
-Bot hỗ trợ 3 nhóm feed:
+Bot hỗ trợ 4 nhóm feed:
 
 * X account feed (/add-x)  
 * Facebook feed fanpage/profile (/add-fb)  
+* Instagram username feed (/add-ig)  
 * Direct RSS feed (/add-link)
 
-Bot dùng Apify làm provider chính cho Facebook:
+Bot dùng Apify cho Facebook và RSS-Bridge cho X/Instagram:
 
-* **Primary provider**: (Theo feed đã đăng ký)  
 * **Facebook /add-fb**: Apify primary
 * **Facebook /add-link**: Direct RSS operator cung cấp
+* **Instagram /add-ig**: RSS-Bridge InstagramBridge
+* **Instagram /add-link**: Direct RSS operator cung cấp
 
 Script vận hành đã có sẵn:
 
@@ -215,16 +217,43 @@ Plaintext
 **Lưu ý quan trọng:**
 
 * Profile hiện tại ưu tiên ID số (sourceType=profile).  
-* Nếu provider trả lời tạm thời (503/timeout/network), bot vẫn cho add feed và trả về cảnh báo (warning).  
-* Runtime sẽ xử lý tiếp bằng Apify primary hoặc direct RSS tùy loại feed.
+* `/add-fb` yêu cầu Apify config hợp lệ trước khi lưu feed.
+* Nếu cần direct RSS cho Facebook, dùng `/add-link platform:FB`.
 
-### **7.3 Direct RSS feeds**
+### **7.3 Instagram feeds**
+
+Thêm:
+
+Plaintext
+
+/add-ig username:\<instagram_username\> channel:\<\#channel\>
+
+Liệt kê:
+
+Plaintext
+
+/list-ig
+
+Xóa:
+
+Plaintext
+
+/remove-ig username:\<instagram_username\> \[channel:\<\#channel\>\]
+
+**Lưu ý quan trọng:**
+
+* Instagram v1 chỉ hỗ trợ username public qua RSS-Bridge.
+* Không cấu hình cookie/session Instagram trong bot.
+* Nếu InstagramBridge bị upstream block hoặc trả feed rỗng, dùng `/add-link platform:IG` với direct RSS URL đã kiểm tra.
+
+### **7.4 Direct RSS feeds**
 
 Thêm:
 
 Plaintext
 
 /add-link rssUrl:https://example.com/feed.xml platform:FB channel:\<\#channel\>
+/add-link rssUrl:https://example.com/feed.xml platform:IG channel:\<\#channel\>
 
 Liệt kê:
 
@@ -259,7 +288,10 @@ Thứ tự runtime:
 
 1. Facebook `/add-fb`: Apify primary
 2. Facebook `/add-link`: direct RSS URL operator cung cấp
-3. X/Twitter: RSS-Bridge
+3. Instagram `/add-ig`: RSS-Bridge InstagramBridge
+4. Instagram `/add-link`: direct RSS URL operator cung cấp
+5. X/Twitter: RSS-Bridge
+
 ## **9. Quy trình verify sau khi add feed**
 
 1. Chạy command trên Discord.  
@@ -267,7 +299,7 @@ Thứ tự runtime:
 
 PowerShell
 
-.\\scripts\\integration\-evidence.ps1 \-ComposeMode prod \-FanpageSource 100057435399770 \-FacebookSourceType profile \-LookbackMinutes 360
+.\\scripts\\integration\-evidence.ps1 \-ComposeMode prod \-FanpageSource 100057435399770 \-FacebookSourceType profile \-InstagramUsername nasa \-LookbackMinutes 360
 
 3. Theo dõi log:
 
@@ -312,12 +344,14 @@ Facebook source onboarding decision tree:
 4. If the result is `use-add-link`, run the concrete `/add-link` command printed by the script.
 5. If the result is `configure-apify`, set `APIFY__ENABLED=true`, `APIFY__APITOKEN`, and `APIFY__ACTORID`, or add a direct RSS map entry.
 6. If the result is `fix-direct-rss`, update the mapped RSS URL before running `/add-link`.
+
 Direct RSS validation checklist:
 
 * Open the RSS URL in a browser or run `Invoke-WebRequest <direct-rss-url>`.
 * Confirm HTTP 200.
 * Confirm the XML contains real `<item>` or `<entry>` posts, not an error page.
 * Acceptable origins include official website RSS, FetchRSS, RSS.app, or another generated RSS provider.
+* Use `platform:FB` for Facebook direct RSS and `platform:IG` for Instagram direct RSS.
 * Do not commit private generated RSS URLs or provider credentials.
 * Keep private mappings in `config/direct-rss-sources.local.csv`; use `config/direct-rss-sources.example.csv` as the tracked template.
 
@@ -326,6 +360,12 @@ Facebook provider policy:
 * RSS-Bridge is no longer used for Facebook.
 * Do not configure Facebook cookies for RSS-Bridge.
 * Use Apify for `/add-fb` and `/add-link platform:FB` for operator-provided direct RSS.
+
+Instagram provider policy:
+
+* `/add-ig` uses RSS-Bridge `InstagramBridge` public mode.
+* Do not configure Instagram cookies/session in bot env.
+* Use `/add-link platform:IG` for operator-provided direct RSS when InstagramBridge is blocked or empty.
 
 ### **10.3 Checklist release**
 
@@ -370,7 +410,7 @@ docker compose \-\-profile prod restart bot
 
 ## **12\. Bảo mật**
 
-1. Không commit các giá trị bí mật (DISCORD\_TOKEN, APIFY token, FB\_COOKIE, DB password).  
+1. Không commit các giá trị bí mật (DISCORD\_TOKEN, APIFY token, DB password).  
 2. Nếu lộ secret, phải rotate (đổi mới) ngay lập tức.  
 3. Ưu tiên dùng secret manager cho môi trường production thực tế.
 
